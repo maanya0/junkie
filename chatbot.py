@@ -134,7 +134,7 @@ Example JSON reply:
 
 # ---------- discord commands ----------
 def setup_chat(bot):
-    @bot.command(name="c")
+    @bot.command(name=".")
     async def chat_cmd(ctx, *, prompt: str):
         if ctx.author.id != bot.bot.user.id:
             return
