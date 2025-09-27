@@ -21,8 +21,6 @@ class SelfBot:
         self.bot = commands.Bot(
             command_prefix=prefix,
             self_bot=True,
-         #   help_command=None,       # disable default help if you want your own
-            #intents=discord.Intents.default()
         )
 
         # expose direct access if needed
@@ -35,14 +33,16 @@ class SelfBot:
 
         @self.bot.event
         async def on_message(message: discord.Message):
-            # ignore messages not sent by us
-            if message.author.id != self.bot.user.id:
+            # ignore messages sent by other bots (prevents bot loops)
+            if message.author.bot:
                 return
-
-            # process commands if they start with prefix
-            if message.content.startswith(self.prefix):
-                # let commands.Bot handle it
-                await self.bot.process_commands(message)
+            
+            # ignore messages without the prefix
+            if not message.content.startswith(self.prefix):
+                return
+            
+            # process commands
+            await self.bot.process_commands(message)
 
     def command(self, name: str = None, **kwargs):
         """
@@ -68,4 +68,3 @@ class SelfBot:
         Start the bot. Blocks until shutdown.
         """
         self.bot.run(self.token)
-
