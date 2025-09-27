@@ -1,9 +1,9 @@
-# main.py  (final diff)
+# main.py
+
 import os
 from dotenv import load_dotenv
-from tldr import setup_tldr# 1️⃣ added ", setup_chat"
-from chatbot import setup_chat   
-
+from selfbot import SelfBot
+from tldr import setup_tldr
 
 load_dotenv()
 
@@ -13,7 +13,6 @@ bot = SelfBot(
 )
 
 setup_tldr(bot)
-setup_chat(bot)                            # 2️⃣ added this line
 
 if __name__ == "__main__":
     bot.run()
