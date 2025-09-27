@@ -5,7 +5,7 @@ from datetime import datetime
 
 import discord
 from openai import AsyncOpenAI
-from selfbot import SelfBot
+
 
 # ──────────────────────────────────────────────
 # LLM Client (Groq / OpenAI-compatible)
