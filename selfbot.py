@@ -1,70 +1,82 @@
-# selfbot.py
+# tldr.py
 
 import os
+from datetime import datetime
+
 import discord
-from discord.ext import commands
+from openai import AsyncOpenAI
+from selfbot import SelfBot
 
-class SelfBot:
-    def __init__(self, *, token: str = None, prefix: str = "!"):
-        """
-        A simple wrapper around discord.py-self for creating selfbots.
+# ──────────────────────────────────────────────
+# LLM Client (Groq / OpenAI-compatible)
+# ──────────────────────────────────────────────
 
-        Args:
-            token: Your Discord user token. If not provided, will try DISCORD_TOKEN env var.
-            prefix: The command prefix to listen for.
-        """
-        self.token = token or os.getenv("DISCORD_TOKEN")
-        if not self.token:
-            raise ValueError("Discord token must be provided either as argument or DISCORD_TOKEN env var.")
+client = AsyncOpenAI(
+    base_url="https://api.groq.com/openai/v1",
+    api_key=os.getenv("GROQ_API_KEY")
+)
 
-        # instantiate the Bot with `self_bot=True`
-        self.bot = commands.Bot(
-            command_prefix=prefix,
-            self_bot=True,
-         #   help_command=None,       # disable default help if you want your own
-            #intents=discord.Intents.default()
+# ──────────────────────────────────────────────
+# Public API: Setup TL;DR Command
+# ──────────────────────────────────────────────
+
+def setup_tldr(bot: SelfBot):
+    @bot.command("tldr")
+    async def tldr(ctx, count: int = 50):
+        if ctx.author.id != bot.bot.user.id:
+            return
+
+        await ctx.message.delete(delay=1.5)
+
+        messages = await _fetch_recent_messages(ctx, count)
+        summary = await _summarize_messages(messages)
+
+        for chunk in _chunk_text(summary):
+            await ctx.send(f"**TL;DR:**\n{chunk}")
+
+# ──────────────────────────────────────────────
+# Internal Helpers
+# ──────────────────────────────────────────────
+
+async def _fetch_recent_messages(ctx, count: int = 50, skip_existing_tldr: bool = True):
+    try:
+        messages = [
+            m async for m in ctx.channel.history(limit=count)
+            if not (
+                skip_existing_tldr and
+                m.author.id == ctx.bot.user.id and
+                "**TL;DR:**" in m.content
+            )
+        ]
+        messages.reverse()
+        return messages
+    except Exception as e:
+        await ctx.send(f"Could not fetch history: {e}", delete_after=10)
+        return []
+
+async def _summarize_messages(messages):
+    prompt = _build_prompt(messages)
+    try:
+        response = await client.chat.completions.create(
+            model="moonshotai/kimi-k2-instruct",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.4,
         )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"OpenAI error: {e}"
 
-        # expose direct access if needed
-        self.prefix = prefix
+def _build_prompt(messages):
+    lines = []
+    for m in messages:
+        timestamp = m.created_at.strftime("%H:%M")
+        author = m.author.display_name
+        content = m.clean_content
+        lines.append(f"[{timestamp}] {author}: {content}")
+    return (
+        "Summarize the following Discord conversation in 4-6 bullet points.\n\n"
+        + "\n".join(lines)
+    )
 
-        # hook default events
-        @self.bot.event
-        async def on_ready():
-            print(f"[SELF-BOT] Logged in as {self.bot.user} (ID: {self.bot.user.id})")
-
-        @self.bot.event
-        async def on_message(message: discord.Message):
-            # ignore messages not sent by us
-            if message.author.id != self.bot.user.id:
-                return
-
-            # process commands if they start with prefix
-            if message.content.startswith(self.prefix):
-                # let commands.Bot handle it
-                await self.bot.process_commands(message)
-
-    def command(self, name: str = None, **kwargs):
-        """
-        Decorator to register a command on the selfbot.
-
-        Usage:
-            @bot.command("foo")
-            async def _(ctx, ...):
-                ...
-
-        If name is None, decorator will use the function name.
-        """
-        return self.bot.command(name=name, **kwargs)
-
-    def event(self, coro):
-        """
-        Shortcut decorator to register arbitrary events.
-        """
-        return self.bot.event(coro)
-
-    def run(self):
-        """
-        Start the bot. Blocks until shutdown.
-        """
-        self.bot.run(self.token, bot=False)
+def _chunk_text(text, size: int = 1800):
+    return [text[i:i + size] for i in range(0, len(text), size)]
