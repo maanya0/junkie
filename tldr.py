@@ -15,12 +15,24 @@ client = AsyncOpenAI(
 def setup_tldr(bot: SelfBot):
     @bot.command("tldr")
     async def tldr(ctx, count: int = 50):
-        # Safe channel name handling for both DMs and server channels
-        channel_name = ctx.channel.name if hasattr(ctx.channel, 'name') else "DM"
+        # Safe channel identification
+        if isinstance(ctx.channel, discord.DMChannel):
+            channel_type = "DM"
+            channel_name = f"@{ctx.channel.recipient}"
+        elif isinstance(ctx.channel, discord.GroupChannel):
+            channel_type = "Group DM"
+            channel_name = f"GroupDM:{ctx.channel.id}"
+        else:
+            channel_type = "Server"
+            channel_name = f"#{ctx.channel.name}"
         
         print(f"[DEBUG] TLDR command triggered by {ctx.author} ({ctx.author.id})")
         print(f"[DEBUG] Message content: '{ctx.message.content}'")
-        print(f"[DEBUG] Channel: #{channel_name}")
+        print(f"[DEBUG] Channel: {channel_name} ({channel_type})")
+        
+        # Handle different channel types
+        if isinstance(ctx.channel, discord.GroupChannel):
+            await ctx.send("⚠️ Group DM support is limited. Trying to fetch messages...", delete_after=3)
         
         try:
             await ctx.message.delete(delay=1.5)
@@ -30,7 +42,7 @@ def setup_tldr(bot: SelfBot):
         
         messages = await _fetch_recent_messages(ctx, count)
         if not messages:
-            await ctx.send("No messages to summarize.", delete_after=5)
+            await ctx.send("No messages to summarize or cannot fetch history.", delete_after=5)
             return
             
         summary = await _summarize_messages(messages)
@@ -41,6 +53,11 @@ def setup_tldr(bot: SelfBot):
 
 async def _fetch_recent_messages(ctx, count: int = 50, skip_existing_tldr: bool = True):
     try:
+        # Handle different channel types
+        if isinstance(ctx.channel, discord.GroupChannel):
+            # Group DMs have different history limits
+            count = min(count, 50)  # Limit for group DMs
+            
         messages = [
             m async for m in ctx.channel.history(limit=count)
             if not (
@@ -50,8 +67,11 @@ async def _fetch_recent_messages(ctx, count: int = 50, skip_existing_tldr: bool 
             )
         ]
         messages.reverse()
-        print(f"[DEBUG] Fetched {len(messages)} messages")
+        print(f"[DEBUG] Fetched {len(messages)} messages from {type(ctx.channel).__name__}")
         return messages
+    except discord.Forbidden:
+        print(f"[DEBUG] Cannot access message history in {type(ctx.channel).__name__}")
+        return []
     except Exception as e:
         print(f"[DEBUG] Could not fetch history: {e}")
         return []
