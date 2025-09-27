@@ -91,7 +91,7 @@ async def _test_tool(name: str, test_query: str) -> bool:
 async def write_tool(name: str, description: str, ctx: commands.Context) -> str:
     """
     Ask the LLM to generate a complete async function + schema,
-    then iteratively refine and test it until it works.
+    then test it immediately within the same prompt.
     """
     prompt = f"""
 Write a complete, self-contained async Python function named `{name}` that:
@@ -106,33 +106,32 @@ Requirements:
 Example format:
 #schema: {{"tool": "fetch_gif", "...": "..."}}
 async def fetch_gif(): ...
+
+After writing the function, test it with the following query: 'test'
 """
-    for attempt in range(3):  # Try up to 3 times to get a working tool
-        resp = await client.chat.completions.create(
-            model="moonshotai/kimi-k2-instruct",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=500,
-            stop=["\n\n"]
-        )
-        raw = resp.choices[0].message.content.strip()
+    resp = await client.chat.completions.create(
+        model="moonshotai/kimi-k2-instruct",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=500,
+        stop=["\n\n"]
+    )
+    raw = resp.choices[0].message.content.strip()
 
-        # split schema line + code
-        schema_line, code = raw.split("\n", 1)
-        schema = json.loads(schema_line.replace("#schema:", "").strip())
+    # split schema line + code
+    schema_line, code = raw.split("\n", 1)
+    schema = json.loads(schema_line.replace("#schema:", "").strip())
 
-        # Save to Redis
-        await _save_tool(name, json.dumps(schema), code)
+    # Save to Redis
+    await _save_tool(name, json.dumps(schema), code)
 
-        # Test the tool with a simple query
-        test_query = "test"
-        if await _test_tool(name, test_query):
-            return f"Tool `{name}` registered and tested successfully."
-        else:
-            await _remove_tool(name)  # Remove the tool if test fails
-            prompt += f"\n\nThe tool failed on attempt {attempt + 1}. Please try again."
-
-    return f"Tool `{name}` failed after multiple attempts and was not registered."
+    # Test the tool with the predefined query
+    test_query = "test"
+    if await _test_tool(name, test_query):
+        return f"Tool `{name}` registered and tested successfully."
+    else:
+        await _remove_tool(name)  # Remove the tool if test fails
+        return f"Tool `{name}` failed the test and was not registered."
 
 async def remove_tool(name: str, ctx: commands.Context) -> str:
     await _remove_tool(name)
@@ -205,9 +204,7 @@ def setup_chat(bot):
         r = redis.from_url(os.getenv("REDIS_URL"))
         await r.delete(REDIS_KEY)
         await r.close()
-        await ctx.send("🧠 Memory wiped.", delete_after=5)
-
-    @bot.command(name="ping")
+        await ctx.send("🧠 Memory wiped.", delete_after=5)    @bot.command(name="ping")
     async def forget_cmd(ctx):
         if ctx.author.id != bot.bot.user.id:
             return
