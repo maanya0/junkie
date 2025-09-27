@@ -1,11 +1,11 @@
-# chatbot.py  –  single-roast, agentic, prefix="."
+# chatbot.py  –  dynamic-tool, single-message, no-dupes, prefix="."
 import os, json, discord, redis.asyncio as redis, aiohttp, re
 from datetime import datetime
 from openai import AsyncOpenAI
 from serpapi import GoogleSearch
 
 client = AsyncOpenAI(
-    base_url="https://api.groq.com/openai/v1",          # ← fixed space
+    base_url="https://api.groq.com/openai/v1",
     api_key=os.getenv("GROQ_API_KEY")
 )
 
@@ -42,7 +42,42 @@ def _trim(mem, budget):
         out.append(m)
     return out
 
-# ---------- tools ----------
+# ---------- dynamic tools ----------
+async def _load_tool(name: str) -> dict:
+    r = redis.from_url(os.getenv("REDIS_URL"))
+    raw = await r.get(f"tool:{name}")
+    await r.close()
+    return json.loads(raw) if raw else None
+
+async def _save_tool(name: str, schema: str, code: str):
+    r = redis.from_url(os.getenv("REDIS_URL"))
+    await r.set(f"tool:{name}", json.dumps({"schema": schema, "code": code}))
+    await r.close()
+
+async def _list_tools() -> list[tuple[str, str]]:
+    r = redis.from_url(os.getenv("REDIS_URL"))
+    keys = await r.keys("tool:*")
+    tools = []
+    for k in keys:
+        raw = await r.get(k)
+        t = json.loads(raw)
+        tools.append((k.decode().split(":", 1)[1], t["schema"]))
+    await r.close()
+    return tools
+
+async def _exec_tool(name: str, kwargs: dict, ctx: discord.Context) -> str:
+    t = await _load_tool(name)
+    if not t:
+        return f"Tool `{name}` not found."
+    loc = {}
+    exec(t["code"], globals(), loc)
+    func = loc[name]
+    # inject ctx if the tool wants it
+    if "ctx" in func.__code__.co_varnames:
+        kwargs["ctx"] = ctx
+    return await func(**{k: v for k, v in kwargs.items() if k != "tool"})
+
+# ---------- static tools ----------
 async def google_search(query: str, num: int = 3) -> str:
     search = GoogleSearch({"q": query, "engine": "google", "num": num, "api_key": SERPER_KEY})
     data = search.get_dict()
@@ -72,14 +107,19 @@ async def python_exec(code: str) -> str:
         return f"Python error: {e}"
 
 # ---------- agent ----------
-async def agent_turn(user_text: str, memory: list) -> str:
-    tool_desc = """
+async def agent_turn(user_text: str, memory: list, ctx: discord.Context) -> str:
+    dyn = await _list_tools()
+    dyn_desc = "\n".join(f"- {n}: {s}" for n, s in dyn)
+    tool_desc = f"""
 You can use these tools. Reply with ONLY a JSON block to call one, otherwise answer normally.
-tools:
-- search_google: {"tool": "search_google", "query": "string"}
-- fetch_url:     {"tool": "fetch_url", "url": "string"}
-- python_exec:   {"tool": "python_exec", "code": "string"}
-Example: {"tool": "search_google", "query": "current Bitcoin price"}
+static:
+- search_google: {{"tool": "search_google", "query": "string"}}
+- fetch_url:     {{"tool": "fetch_url", "url": "string"}}
+- python_exec:   {{"tool": "python_exec", "code": "string"}}
+- add_tool:      {{"tool": "add_tool", "name": "string", "schema": "string", "code": "string"}}
+- remove_tool:   {{"tool": "remove_tool", "name": "string"}}
+dynamic:
+{dyn_desc}
 """.strip()
 
     msgs = [{"role": "system", "content": SYSTEM_PROMPT + "\n" + tool_desc}]
@@ -91,7 +131,7 @@ Example: {"tool": "search_google", "query": "current Bitcoin price"}
         messages=msgs,
         temperature=0.3,
         max_tokens=350,
-        stop=["\n\n"]                       # keep it short
+        stop=["\n\n"]
     )
     text = response.choices[0].message.content.strip()
 
@@ -105,23 +145,35 @@ Example: {"tool": "search_google", "query": "current Bitcoin price"}
                 return f"📄 Page content:\n{await fetch_url(call['url'])}"
             if tool == "python_exec":
                 return f"🐍 Output:\n{await python_exec(call['code'])}"
+            if tool == "add_tool":
+                await _save_tool(call["name"], call["schema"], call["code"])
+                return f"Tool `{call['name']}` registered."
+            if tool == "remove_tool":
+                r = redis.from_url(os.getenv("REDIS_URL"))
+                await r.delete(f"tool:{call['name']}")
+                await r.close()
+                return f"Tool `{call['name']}` removed."
+            if tool in {n for n, _ in dyn}:
+                return await _exec_tool(tool, call, ctx)
         except Exception as e:
             return f"Tool failed: {e}"
     return text
 
 # ---------- discord ----------
 def setup_chat(bot):
-    @bot.command(name=".")          # invoked by  .chat  (prefix = ".")
+    @bot.command(name=".")
     async def chat_cmd(ctx, *, prompt: str):
         if ctx.author.id != bot.bot.user.id:
             return
         async with ctx.typing():
             memory = await _load_mem()
             memory.append({"role": "user", "content": prompt})
-            reply  = await agent_turn(prompt, memory)
+            reply  = await agent_turn(prompt, memory, ctx)
+            if not reply:                      # skip empty
+                return
             memory.append({"role": "assistant", "content": reply})
             await _save_mem(memory)
-        await ctx.send(f"**🤖 {reply}**")          # ← single message only
+        await ctx.send(f"**🤖 {reply}**")          # single message
 
     @bot.command(name="fgt")
     async def forget_cmd(ctx):
