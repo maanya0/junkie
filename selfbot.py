@@ -67,4 +67,4 @@ class SelfBot:
         """
         Start the bot. Blocks until shutdown.
         """
-        self.bot.run(self.token, bot=False)
+        self.bot.run(self.token)
