@@ -15,9 +15,12 @@ client = AsyncOpenAI(
 def setup_tldr(bot: SelfBot):
     @bot.command("tldr")
     async def tldr(ctx, count: int = 50):
+        # Safe channel name handling for both DMs and server channels
+        channel_name = ctx.channel.name if hasattr(ctx.channel, 'name') else "DM"
+        
         print(f"[DEBUG] TLDR command triggered by {ctx.author} ({ctx.author.id})")
         print(f"[DEBUG] Message content: '{ctx.message.content}'")
-        print(f"[DEBUG] Channel: #{ctx.channel.name}")
+        print(f"[DEBUG] Channel: #{channel_name}")
         
         try:
             await ctx.message.delete(delay=1.5)
