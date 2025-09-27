@@ -14,4 +14,4 @@ aiohttp>=3.8.0
 asyncio>=3.4.3
 datetime>=4.3.0
 
-audioop
+audioop-lts
