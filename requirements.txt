@@ -13,3 +13,5 @@ aiohttp>=3.8.0
 # Additional utilities (optional but recommended)
 asyncio>=3.4.3
 datetime>=4.3.0
+
+audioop
