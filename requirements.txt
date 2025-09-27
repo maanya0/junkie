@@ -1,3 +1,6 @@
+
+json
+datetime
 # Core Discord library for self-bots
 discord.py-self>=2.0.0
 
