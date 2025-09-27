@@ -10,9 +10,15 @@ class SelfBot:
         if not self.token:
             raise ValueError("Discord token must be provided either as argument or DISCORD_TOKEN env var.")
 
+        # Add intents for better compatibility
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.messages = True
+
         self.bot = commands.Bot(
             command_prefix=prefix,
             self_bot=True,
+            intents=intents
         )
 
         self.prefix = prefix
@@ -24,9 +30,18 @@ class SelfBot:
 
         @self.bot.event
         async def on_message(message: discord.Message):
-            # Safe channel name handling
-            channel_name = message.channel.name if hasattr(message.channel, 'name') else "DM"
-            print(f"[DEBUG] Message received: '{message.content}' from {message.author} ({message.author.id}) in #{channel_name}")
+            # Safe channel identification
+            if isinstance(message.channel, discord.DMChannel):
+                channel_type = "DM"
+                channel_name = f"@{message.channel.recipient}"
+            elif isinstance(message.channel, discord.GroupChannel):
+                channel_type = "Group DM"
+                channel_name = f"GroupDM:{message.channel.id}"
+            else:
+                channel_type = "Server"
+                channel_name = f"#{message.channel.name}"
+            
+            print(f"[DEBUG] {channel_type} Message: '{message.content}' from {message.author} ({message.author.id}) in {channel_name}")
             
             # Ignore messages sent by other bots
             if message.author.bot:
