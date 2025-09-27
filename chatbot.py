@@ -13,7 +13,7 @@ SYSTEM_PROMPT = (
 )
 
 def setup_chat(bot):
-    @bot.command("chat")
+    @bot.command("c")
     async def chat_command(ctx, *, prompt: str):
         # Only react to ourselves
         if ctx.author.id != bot.bot.user.id:
