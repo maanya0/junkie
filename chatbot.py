@@ -129,7 +129,7 @@ Example JSON reply:
 
 # ---------- discord commands ----------
 def setup_chat(bot):
-    @bot.command(name="chat")
+    @bot.command(name="c")
     async def chat_cmd(ctx, *, prompt: str):
         if ctx.author.id != bot.bot.user.id:
             return
@@ -142,7 +142,7 @@ def setup_chat(bot):
         for chunk in [reply[i:i+1900] for i in range(0, len(reply), 1900)]:
             await ctx.send(f"**🤖 {chunk}**")
 
-    @bot.command(name="forget")
+    @bot.command(name="fgt")
     async def forget_cmd(ctx):
         if ctx.author.id != bot.bot.user.id:
             return
