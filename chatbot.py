@@ -8,6 +8,11 @@ client = AsyncOpenAI(
     api_key=os.getenv("GROQ_API_KEY")
 )
 
+SYSTEM_PROMPT = (
+    "You are a helpful Discord assistant. "
+    "Use the conversation history to stay consistent."
+)
+
 PREFIX        = "."
 REDIS_KEY     = "selfbot:chat_history"
 MAX_TOKENS    = 4_000
