@@ -1,5 +1,5 @@
 # tldr.py
-
+import json
 import os
 from datetime import datetime
 
@@ -7,37 +7,51 @@ import discord
 from openai import AsyncOpenAI
 from selfbot import SelfBot
 
-# ──────────────────────────────────────────────
-# LLM Client (Groq / OpenAI-compatible)
-# ──────────────────────────────────────────────
-
+# ------------------------------------------------------------------
+# 1.  LLM client (Groq / OpenAI-compatible)
+# ------------------------------------------------------------------
 client = AsyncOpenAI(
     base_url="https://api.groq.com/openai/v1",
     api_key=os.getenv("GROQ_API_KEY")
 )
 
-# ──────────────────────────────────────────────
-# Public API: Setup TL;DR Command
-# ──────────────────────────────────────────────
+# ------------------------------------------------------------------
+# 2.  Load whitelisted user IDs once at import-time
+# ------------------------------------------------------------------
+WHITELIST = set()
 
+try:
+    with open("whitelisted_users.json", encoding="utf-8") as f:
+        data = json.load(f)
+        # Accept either string or int IDs
+        WHITELIST = {int(u) for u in data.get("users", [])}
+except (FileNotFoundError, json.JSONDecodeError, ValueError) as exc:
+    # If the file is missing or broken, nobody can use !tldr
+    print(f"[TLDR] Could not load whitelisted_users.json -> {exc}")
+
+# ------------------------------------------------------------------
+# 3.  Public API: attach !tldr command to the self-bot
+# ------------------------------------------------------------------
 def setup_tldr(bot: SelfBot):
     @bot.command("tldr")
     async def tldr(ctx, count: int = 50):
-        if ctx.author.id != bot.bot.user.id:
+        # Only whitelisted users may summon the bot
+        if ctx.author.id not in WHITELIST:
             return
 
+        # Delete the trigger message after a short delay
         await ctx.message.delete(delay=1.5)
 
+        # Fetch, summarise, chunk, and post
         messages = await _fetch_recent_messages(ctx, count)
-        summary = await _summarize_messages(messages)
+        summary  = await _summarize_messages(messages)
 
         for chunk in _chunk_text(summary):
             await ctx.send(f"**TL;DR:**\n{chunk}")
 
-# ──────────────────────────────────────────────
-# Internal Helpers
-# ──────────────────────────────────────────────
-
+# ------------------------------------------------------------------
+# 4.  Internal helpers (unchanged)
+# ------------------------------------------------------------------
 async def _fetch_recent_messages(ctx, count: int = 50, skip_existing_tldr: bool = True):
     try:
         messages = [
