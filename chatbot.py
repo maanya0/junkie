@@ -6,7 +6,7 @@ from serpapi import GoogleSearch
 from discord.ext import commands
 
 client = AsyncOpenAI(
-    base_url="https://api.groq.com/openai/v1",
+    base_url="https://api.groq.com/openai/v1",   # ← no space
     api_key=os.getenv("GROQ_API_KEY")
 )
 
@@ -65,7 +65,6 @@ async def _list_tools() -> list[tuple[str, str]]:
         tools.append((k.decode().split(":", 1)[1], t["schema"]))
     await r.close()
     return tools
-    
 
 async def _exec_tool(name: str, kwargs: dict, ctx: commands.Context) -> str:
     t = await _load_tool(name)
@@ -74,7 +73,6 @@ async def _exec_tool(name: str, kwargs: dict, ctx: commands.Context) -> str:
     loc = {}
     exec(t["code"], globals(), loc)
     func = loc[name]
-    # inject ctx if the tool wants it
     if "ctx" in func.__code__.co_varnames:
         kwargs["ctx"] = ctx
     return await func(**{k: v for k, v in kwargs.items() if k != "tool"})
@@ -160,42 +158,7 @@ dynamic:
         except Exception as e:
             return f"Tool failed: {e}"
     return text
-# ---------- inside chatbot.py ----------
-async def write_tool(name: str, description: str, ctx: commands.Context) -> str:
-    """
-    Ask the LLM to generate a complete async function + schema,
-    then auto-register it.
-    """
-    prompt = f"""
-Write a complete, self-contained async Python function named `{name}` that:
-{description}
 
-Requirements:
-- async def {name}(...):  (add ctx param if you need to send messages)
-- return string (URL, text, or empty string)
-- use only std-lib + aiohttp + os + json
-- put no comments, no explanation, only code
-- add {"tool": "{name}", ...} schema line at top as comment
-Example format:
-#schema: {{"tool": "gif_post", "query": "string"}}
-async def gif_post(query): ...
-"""
-    resp = await client.chat.completions.create(
-        model="moonshotai/kimi-k2-instruct",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=500,
-        stop=["\n\n"]
-    )
-    raw = resp.choices[0].message.content.strip()
-
-    # split schema line + code
-    schema_line, code = raw.split("\n", 1)
-    schema = json.loads(schema_line.replace("#schema:", "").strip())
-
-    # save to Redis
-    await _save_tool(name, json.dumps(schema), code)
-    return f"Tool `{name}` auto-generated and registered."
 # ---------- discord ----------
 def setup_chat(bot):
     @bot.command(name=".")
@@ -210,7 +173,8 @@ def setup_chat(bot):
                 return
             memory.append({"role": "assistant", "content": reply})
             await _save_mem(memory)
-        await ctx.send(f"**🤖 {reply}**")          # single message
+        print(f"[GIF-DEBUG] reply = {repr(reply)}")   # debug
+        await ctx.send(reply)                          # raw URL → Discord embeds
 
     @bot.command(name="fgt")
     async def forget_cmd(ctx):
