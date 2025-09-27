@@ -1,70 +1,122 @@
-# selfbot.py
-
-import os
 import discord
 from discord.ext import commands
+import asyncio
+import datetime
+import random
 
-class SelfBot:
-    def __init__(self, *, token: str = None, prefix: str = "!"):
-        """
-        A simple wrapper around discord.py-self for creating selfbots.
+# Import whitelist from main
+from main import is_whitelisted
 
-        Args:
-            token: Your Discord user token. If not provided, will try DISCORD_TOKEN env var.
-            prefix: The command prefix to listen for.
-        """
-        self.token = token or os.getenv("DISCORD_TOKEN")
-        if not self.token:
-            raise ValueError("Discord token must be provided either as argument or DISCORD_TOKEN env var.")
-
-        # instantiate the Bot with `self_bot=True`
-        self.bot = commands.Bot(
-            command_prefix=prefix,
-            self_bot=True,
-         #   help_command=None,       # disable default help if you want your own
-            #intents=discord.Intents.default()
+class SelfbotCommands(commands.Cog):
+    def __init__(self, client):
+        self.client = client
+    
+    @commands.command(name='ping')
+    @is_whitelisted()
+    async def ping(self, ctx):
+        """Check bot latency"""
+        latency = round(self.client.latency * 1000)
+        embed = discord.Embed(
+            title="🏓 Pong!",
+            description=f"Latency: `{latency}ms`",
+            color=0x00ff00
         )
+        await ctx.send(embed=embed)
+    
+    @commands.command(name='purge', aliases=['clear'])
+    @is_whitelisted()
+    async def purge(self, ctx, amount: int = 5):
+        """Delete your recent messages"""
+        if amount > 100:
+            amount = 100
+        
+        def is_me(m):
+            return m.author == self.client.user
+        
+        deleted = await ctx.channel.purge(limit=amount, check=is_me)
+        await ctx.send(f'🗑️ Deleted {len(deleted)} messages', delete_after=3)
+    
+    @commands.command(name='spam')
+    @is_whitelisted()
+    async def spam(self, ctx, times: int = 5, *, message: str = "spam"):
+        """Spam messages (use carefully)"""
+        if times > 20:
+            times = 20
+        
+        for i in range(times):
+            await ctx.send(f"{message} [{i+1}/{times}]")
+            await asyncio.sleep(0.5)
+    
+    @commands.command(name='ghostping')
+    @is_whitelisted()
+    async def ghostping(self, ctx, user: discord.Member = None):
+        """Ghost ping someone"""
+        if user is None:
+            await ctx.send("❌ Mention a user to ghost ping!")
+            return
+        
+        msg = await ctx.send(f"{user.mention}")
+        await msg.delete()
+    
+    @commands.command(name='status')
+    @is_whitelisted()
+    async def status(self, ctx, *, status_text: str = None):
+        """Change your status"""
+        if status_text is None:
+            await ctx.send("❌ Provide a status text!")
+            return
+        
+        activity = discord.Game(name=status_text)
+        await self.client.change_presence(activity=activity)
+        await ctx.send(f"✅ Status changed to: `{status_text}`")
+    
+    @commands.command(name='info')
+    @is_whitelisted()
+    async def info(self, ctx):
+        """Show bot info"""
+        embed = discord.Embed(
+            title="🔒 Selfbot Info",
+            description="Whitelisted Selfbot Wrapper",
+            color=0x00ff00,
+            timestamp=datetime.datetime.utcnow()
+        )
+        
+        embed.add_field(name="👤 User", value=self.client.user.mention, inline=True)
+        embed.add_field(name="📊 Servers", value=len(self.client.guilds), inline=True)
+        embed.add_field(name="⏱️ Uptime", value="Active", inline=True)
+        embed.add_field(name="🔒 Whitelist", value="Enabled", inline=True)
+        embed.add_field(name="📝 Prefix", value=f"`{ctx.prefix}`", inline=True)
+        
+        await ctx.send(embed=embed)
+    
+    @commands.command(name='help')
+    @is_whitelisted()
+    async def help_command(self, ctx):
+        """Show available commands"""
+        embed = discord.Embed(
+            title="🔒 Selfbot Commands",
+            description="Whitelisted commands only",
+            color=0x00ff00
+        )
+        
+        commands_list = [
+            ("`ping`", "Check bot latency"),
+            ("`purge [amount]`", "Delete your messages"),
+            ("`spam [times] [message]`", "Spam messages"),
+            ("`ghostping @user`", "Ghost ping someone"),
+            ("`status [text]`", "Change your status"),
+            ("`info`", "Show bot info"),
+            ("`help`", "Show this help"),
+            ("`wladd @user`", "Add to whitelist (owner)"),
+            ("`wlremove @user`", "Remove from whitelist (owner)"),
+            ("`whitelist`", "List whitelisted users (owner)"),
+            ("`amIwhitelisted`", "Check if you're whitelisted")
+        ]
+        
+        for cmd, desc in commands_list:
+            embed.add_field(name=cmd, value=desc, inline=False)
+        
+        await ctx.send(embed=embed)
 
-        # expose direct access if needed
-        self.prefix = prefix
-
-        # hook default events
-        @self.bot.event
-        async def on_ready():
-            print(f"[SELF-BOT] Logged in as {self.bot.user} (ID: {self.bot.user.id})")
-
-        @self.bot.event
-        async def on_message(message: discord.Message):
-            # ignore messages not sent by us
-            if message.author.id != self.bot.user.id:
-                return
-
-            # process commands if they start with prefix
-            if message.content.startswith(self.prefix):
-                # let commands.Bot handle it
-                await self.bot.process_commands(message)
-
-    def command(self, name: str = None, **kwargs):
-        """
-        Decorator to register a command on the selfbot.
-
-        Usage:
-            @bot.command("foo")
-            async def _(ctx, ...):
-                ...
-
-        If name is None, decorator will use the function name.
-        """
-        return self.bot.command(name=name, **kwargs)
-
-    def event(self, coro):
-        """
-        Shortcut decorator to register arbitrary events.
-        """
-        return self.bot.event(coro)
-
-    def run(self):
-        """
-        Start the bot. Blocks until shutdown.
-        """
-        self.bot.run(self.token)
+def setup(client):
+    client.add_cog(SelfbotCommands(client))
