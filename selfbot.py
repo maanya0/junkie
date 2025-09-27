@@ -1,52 +1,70 @@
+# selfbot.py
+
 import os
 import discord
 from discord.ext import commands
-import logging
-
-logger = logging.getLogger(__name__)
 
 class SelfBot:
     def __init__(self, *, token: str = None, prefix: str = "!"):
+        """
+        A simple wrapper around discord.py-self for creating selfbots.
+
+        Args:
+            token: Your Discord user token. If not provided, will try DISCORD_TOKEN env var.
+            prefix: The command prefix to listen for.
+        """
         self.token = token or os.getenv("DISCORD_TOKEN")
         if not self.token:
-            raise ValueError("Discord token must be provided")
+            raise ValueError("Discord token must be provided either as argument or DISCORD_TOKEN env var.")
 
-        self.bot = commands.Bot(command_prefix=prefix, self_bot=True)
+        # instantiate the Bot with `self_bot=True`
+        self.bot = commands.Bot(
+            command_prefix=prefix,
+            self_bot=True,
+         #   help_command=None,       # disable default help if you want your own
+            #intents=discord.Intents.default()
+        )
+
+        # expose direct access if needed
         self.prefix = prefix
 
+        # hook default events
         @self.bot.event
         async def on_ready():
-            logger.info(f"[SELF-BOT] Logged in as {self.bot.user}")
+            print(f"[SELF-BOT] Logged in as {self.bot.user} (ID: {self.bot.user.id})")
 
         @self.bot.event
-        async def on_message(message):
-            # Only process messages from yourself (selfbot)
+        async def on_message(message: discord.Message):
+            # ignore messages not sent by us
             if message.author.id != self.bot.user.id:
                 return
 
-            # Only check whitelist for actual commands
+            # process commands if they start with prefix
             if message.content.startswith(self.prefix):
-                # Get whitelist from main
-                from main import whitelisted_users
-                
-                # Check if channel/user is whitelisted
-                channel_id = message.channel.id
-                user_id = message.author.id
-                
-                # For selfbot, we need to check if the command is being used in a whitelisted context
-                # Since you're sending the command, check if you can use it
-                if user_id not in whitelisted_users:
-                    await message.add_reaction('🔒')
-                    logger.info(f"Blocked command from {user_id}")
-                    return
-
+                # let commands.Bot handle it
                 await self.bot.process_commands(message)
 
     def command(self, name: str = None, **kwargs):
+        """
+        Decorator to register a command on the selfbot.
+
+        Usage:
+            @bot.command("foo")
+            async def _(ctx, ...):
+                ...
+
+        If name is None, decorator will use the function name.
+        """
         return self.bot.command(name=name, **kwargs)
 
     def event(self, coro):
+        """
+        Shortcut decorator to register arbitrary events.
+        """
         return self.bot.event(coro)
 
     def run(self):
-        self.bot.run(self.token)
+        """
+        Start the bot. Blocks until shutdown.
+        """
+        self.bot.run(self.token, bot=False)
