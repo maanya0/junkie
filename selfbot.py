@@ -37,7 +37,7 @@ class SelfBot:
         async def on_message(message: discord.Message):
             # ignore messages not sent by us
             if message.content.startswith(self.prefix):
-        await self.bot.process_commands(message)
+                await self.bot.process_commands(message)
             # process commands if they start with prefix
             if message.content.startswith(self.prefix):
                 # let commands.Bot handle it
