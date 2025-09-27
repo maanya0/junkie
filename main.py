@@ -1,7 +1,6 @@
 # main.py  (final diff)
 import os
 from dotenv import load_dotenv
-from selfbot import SelfBot
 from tldr import setup_tldr, setup_chat   # 1️⃣ added ", setup_chat"
 
 load_dotenv()
