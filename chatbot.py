@@ -161,7 +161,7 @@ dynamic:
             return f"Tool failed: {e}"
     return text
 # ---------- inside chatbot.py ----------
-async def write_tool(name: str, description: str, ctx: discord.Context) -> str:
+async def write_tool(name: str, description: str, ctx: commands.Context) -> str:
     """
     Ask the LLM to generate a complete async function + schema,
     then auto-register it.
