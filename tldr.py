@@ -7,34 +7,34 @@ import discord
 from openai import AsyncOpenAI
 from selfbot import SelfBot
 
-# ──────────────────────────────────────────────
-# LLM Client (Groq / OpenAI-compatible)
-# ──────────────────────────────────────────────
-
 client = AsyncOpenAI(
     base_url="https://api.groq.com/openai/v1",
     api_key=os.getenv("OPENAI_API_KEY")
 )
 
-# ──────────────────────────────────────────────
-# Public API: Setup TL;DR Command
-# ──────────────────────────────────────────────
-
 def setup_tldr(bot: SelfBot):
     @bot.command("tldr")
     async def tldr(ctx, count: int = 50):
-        # Allow anyone to use the command
-        await ctx.message.delete(delay=1.5)
-
+        print(f"[DEBUG] TLDR command triggered by {ctx.author} ({ctx.author.id})")
+        print(f"[DEBUG] Message content: '{ctx.message.content}'")
+        print(f"[DEBUG] Channel: #{ctx.channel.name}")
+        
+        try:
+            await ctx.message.delete(delay=1.5)
+            print("[DEBUG] Message deletion scheduled")
+        except Exception as e:
+            print(f"[DEBUG] Could not delete message: {e}")
+        
         messages = await _fetch_recent_messages(ctx, count)
+        if not messages:
+            await ctx.send("No messages to summarize.", delete_after=5)
+            return
+            
         summary = await _summarize_messages(messages)
-
+        
         for chunk in _chunk_text(summary):
             await ctx.send(f"**TL;DR:**\n{chunk}")
-
-# ──────────────────────────────────────────────
-# Internal Helpers
-# ──────────────────────────────────────────────
+            print(f"[DEBUG] Sent summary chunk: {chunk[:100]}...")
 
 async def _fetch_recent_messages(ctx, count: int = 50, skip_existing_tldr: bool = True):
     try:
@@ -47,9 +47,10 @@ async def _fetch_recent_messages(ctx, count: int = 50, skip_existing_tldr: bool 
             )
         ]
         messages.reverse()
+        print(f"[DEBUG] Fetched {len(messages)} messages")
         return messages
     except Exception as e:
-        await ctx.send(f"Could not fetch history: {e}", delete_after=10)
+        print(f"[DEBUG] Could not fetch history: {e}")
         return []
 
 async def _summarize_messages(messages):
@@ -62,7 +63,8 @@ async def _summarize_messages(messages):
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        return f"OpenAI error: {e}"
+        print(f"[DEBUG] OpenAI error: {e}")
+        return f"Error: {e}"
 
 def _build_prompt(messages):
     lines = []
