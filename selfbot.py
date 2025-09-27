@@ -24,7 +24,9 @@ class SelfBot:
 
         @self.bot.event
         async def on_message(message: discord.Message):
-            print(f"[DEBUG] Message received: '{message.content}' from {message.author} ({message.author.id}) in #{message.channel.name}")
+            # Safe channel name handling
+            channel_name = message.channel.name if hasattr(message.channel, 'name') else "DM"
+            print(f"[DEBUG] Message received: '{message.content}' from {message.author} ({message.author.id}) in #{channel_name}")
             
             # Ignore messages sent by other bots
             if message.author.bot:
