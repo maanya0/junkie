@@ -1,9 +1,7 @@
 import os
 from datetime import datetime
 from openai import AsyncOpenAI
-from selfbot import SelfBot
 
-# --- hard-coded Discord user-ids that may use !tldr -----------------
 ALLOWED_USERS = {1105501912612229141, 1068647185928962068}
 
 client = AsyncOpenAI(
@@ -11,31 +9,17 @@ client = AsyncOpenAI(
     api_key=os.getenv("GROQ_API_KEY")
 )
 
-def setup_tldr(bot: SelfBot):
-    @bot.command("tldr")
-    async def tldr(ctx, count: int = 50):
-        if ctx.author.id not in ALLOWED_USERS:   # silent ignore
-            return
-
-        await ctx.message.delete(delay=1.5)
-
-        messages = await _fetch_recent_messages(ctx, count)
-        summary  = await _summarize_messages(messages)
-
-        for chunk in _chunk_text(summary):
-            await ctx.send(f"**TL;DR:**\n{chunk}")
-
-# ----------------- helpers (unchanged) ------------------------------
-async def _fetch_recent_messages(ctx, count=50, skip_existing_tldr=True):
+# ---------- helpers used by selfbot.py --------------------
+async def _fetch_recent_messages(message, count=50, skip_existing_tldr=True):
     try:
-        msgs = [m async for m in ctx.channel.history(limit=count)
+        msgs = [m async for m in message.channel.history(limit=count)
                 if not (skip_existing_tldr and
-                        m.author.id == ctx.bot.user.id and
+                        m.author.id == message.guild.me.id and
                         "**TL;DR:**" in m.content)]
         msgs.reverse()
         return msgs
     except Exception as e:
-        await ctx.send(f"Could not fetch history: {e}", delete_after=10)
+        await message.channel.send(f"Could not fetch history: {e}", delete_after=10)
         return []
 
 async def _summarize_messages(messages):
