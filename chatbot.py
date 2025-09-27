@@ -111,7 +111,7 @@ Example: {"tool": "search_google", "query": "current Bitcoin price"}
 
 # ---------- discord ----------
 def setup_chat(bot):
-    @bot.command(name="")          # invoked by  .chat  (prefix = ".")
+    @bot.command(name=".")          # invoked by  .chat  (prefix = ".")
     async def chat_cmd(ctx, *, prompt: str):
         if ctx.author.id != bot.bot.user.id:
             return
