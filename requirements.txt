@@ -1,0 +1,15 @@
+# Core Discord library for self-bots
+discord.py-self>=2.0.0
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# OpenAI/Groq API client for TL;DR functionality
+openai>=1.0.0
+
+# Async HTTP support (may be needed for API calls)
+aiohttp>=3.8.0
+
+# Additional utilities (optional but recommended)
+asyncio>=3.4.3
+datetime>=4.3.0
