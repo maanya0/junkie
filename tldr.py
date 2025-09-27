@@ -42,3 +42,49 @@ def _build_prompt(messages):
 
 def _chunk_text(text, size=1800):
     return [text[i:i+size] for i in range(0, len(text), size)]
+
+
+@bot.event
+async def on_message(msg: discord.Message):
+    # ignore ourselves
+    if msg.author.id == bot.bot.user.id:
+        return
+
+    # ignore if chat mode is off here
+    if not CHAT_MODE.get(msg.channel.id, False):
+        return
+
+    # ignore commands
+    if msg.content.startswith(bot.prefix):
+        return
+
+    # only reply if (a) we are mentioned OR (b) message is a reply to us
+    mentioned = bot.bot.user in msg.mentions
+    reply_to_us = msg.reference and msg.reference.resolved and msg.reference.resolved.author.id == bot.bot.user.id
+    if not (mentioned or reply_to_us):
+        return
+
+    # build conversation context: last 20 messages
+    hist = [m async for m in msg.channel.history(limit=20)]
+    hist.reverse()          # oldest → newest
+    lines = []
+    for m in hist:
+        name = m.author.display_name
+        txt  = m.clean_content
+        lines.append(f"{name}: {txt}")
+    prompt = (
+        "You are a helpful, concise Discord assistant. "
+        "Answer the latest message briefly (1-2 sentences). Conversation:\n"
+        + "\n".join(lines)
+    )
+
+    try:
+        resp = await client.chat.completions.create(
+            model="moonshotai/kimi-k2-instruct",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5,
+        )
+        answer = resp.choices[0].message.content.strip()
+        await msg.reply(answer)
+    except Exception as e:
+        await msg.reply(f"Chat error: {e}", delete_after=5)
