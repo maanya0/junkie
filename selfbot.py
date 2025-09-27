@@ -38,10 +38,7 @@ class SelfBot:
             # ignore messages not sent by us
             if message.content.startswith(self.prefix):
                 await self.bot.process_commands(message)
-            # process commands if they start with prefix
-            if message.content.startswith(self.prefix):
-                # let commands.Bot handle it
-                await self.bot.process_commands(message)
+            # process commands if they start with prefiX
 
     def command(self, name: str = None, **kwargs):
         """
