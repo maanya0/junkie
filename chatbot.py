@@ -3,7 +3,7 @@ from openai import AsyncOpenAI
 import os
 
 client = AsyncOpenAI(
-    base_url="https://api.groq.com/openai/v1",
+    base_url="https://api.groq.com/openai/v1",   # ← no spaces
     api_key=os.getenv("GROQ_API_KEY")
 )
 
