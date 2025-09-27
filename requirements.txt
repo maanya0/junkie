@@ -1,3 +1,5 @@
+
+redis>=5.0
 # Core Discord library for self-bots
 discord.py-self>=2.0.0
 
