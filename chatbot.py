@@ -47,7 +47,6 @@ def setup_chat(bot):
     async def chat(ctx, *, prompt: str):
         if ctx.author.id != bot.bot.user.id:
             return
-        await ctx.message.delete(delay=1.5)
 
         memory = await _load_memory()
         memory.append({"role": "user", "content": f"[{datetime.utcnow():%m-%d %H:%M}] {prompt}"})
