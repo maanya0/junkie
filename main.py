@@ -10,7 +10,7 @@ load_dotenv()
 
 bot = SelfBot(
     token=os.getenv("DISCORD_TOKEN"),
-    prefix="!",
+    prefix=".",
 )
 
 setup_tldr(bot)
