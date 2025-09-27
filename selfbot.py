@@ -20,23 +20,27 @@ class SelfBot:
 
         @self.bot.event
         async def on_message(message):
-            # Get whitelist from main
-            from main import whitelisted_users
-            
-            # Allow only whitelisted users
-            if message.author.id not in whitelisted_users:
-                if message.content.startswith(self.prefix):
-                    try:
-                        await message.add_reaction('🔒')
-                        logger.info(f"Blocked {message.author.id}")
-                    except:
-                        pass
+            # Only process messages from yourself (selfbot)
+            if message.author.id != self.bot.user.id:
                 return
 
-            # Process commands for whitelisted users
+            # Only check whitelist for actual commands
             if message.content.startswith(self.prefix):
-                if message.author.id == self.bot.user.id:  # Only process your own commands
-                    await self.bot.process_commands(message)
+                # Get whitelist from main
+                from main import whitelisted_users
+                
+                # Check if channel/user is whitelisted
+                channel_id = message.channel.id
+                user_id = message.author.id
+                
+                # For selfbot, we need to check if the command is being used in a whitelisted context
+                # Since you're sending the command, check if you can use it
+                if user_id not in whitelisted_users:
+                    await message.add_reaction('🔒')
+                    logger.info(f"Blocked command from {user_id}")
+                    return
+
+                await self.bot.process_commands(message)
 
     def command(self, name: str = None, **kwargs):
         return self.bot.command(name=name, **kwargs)
