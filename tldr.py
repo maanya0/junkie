@@ -1,5 +1,6 @@
 # tldr.py
-import json
+# ── only the users in ALLOWED_USERS can trigger !tldr ──
+
 import os
 from datetime import datetime
 
@@ -7,51 +8,43 @@ import discord
 from openai import AsyncOpenAI
 from selfbot import SelfBot
 
-# ------------------------------------------------------------------
-# 1.  LLM client (Groq / OpenAI-compatible)
-# ------------------------------------------------------------------
+# ----------------------------------------------------------
+# 1.  Hard-code the Discord user-ids that are allowed to use
+#     the TL;DR tool. Add / remove IDs as you wish.
+# ----------------------------------------------------------
+ALLOWED_USERS = {1105501912612229141,1068647185928962068}
+
+# ----------------------------------------------------------
+# 2.  Groq / OpenAI-compatible client
+# ----------------------------------------------------------
 client = AsyncOpenAI(
     base_url="https://api.groq.com/openai/v1",
     api_key=os.getenv("GROQ_API_KEY")
 )
 
-# ------------------------------------------------------------------
-# 2.  Load whitelisted user IDs once at import-time
-# ------------------------------------------------------------------
-WHITELIST = set()
-
-try:
-    with open("whitelisted_users.json", encoding="utf-8") as f:
-        data = json.load(f)
-        # Accept either string or int IDs
-        WHITELIST = {int(u) for u in data.get("users", [])}
-except (FileNotFoundError, json.JSONDecodeError, ValueError) as exc:
-    # If the file is missing or broken, nobody can use !tldr
-    print(f"[TLDR] Could not load whitelisted_users.json -> {exc}")
-
-# ------------------------------------------------------------------
-# 3.  Public API: attach !tldr command to the self-bot
-# ------------------------------------------------------------------
+# ----------------------------------------------------------
+# 3.  Public API: register the !tldr command
+# ----------------------------------------------------------
 def setup_tldr(bot: SelfBot):
     @bot.command("tldr")
     async def tldr(ctx, count: int = 50):
-        # Only whitelisted users may summon the bot
-        if ctx.author.id not in WHITELIST:
+        # ignore anyone not in the allow-list
+        if ctx.author.id not in ALLOWED_USERS:
             return
 
-        # Delete the trigger message after a short delay
+        # delete the invocation message
         await ctx.message.delete(delay=1.5)
 
-        # Fetch, summarise, chunk, and post
+        # fetch, summarize, send
         messages = await _fetch_recent_messages(ctx, count)
         summary  = await _summarize_messages(messages)
 
         for chunk in _chunk_text(summary):
             await ctx.send(f"**TL;DR:**\n{chunk}")
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------
 # 4.  Internal helpers (unchanged)
-# ------------------------------------------------------------------
+# ----------------------------------------------------------
 async def _fetch_recent_messages(ctx, count: int = 50, skip_existing_tldr: bool = True):
     try:
         messages = [
@@ -84,8 +77,8 @@ def _build_prompt(messages):
     lines = []
     for m in messages:
         timestamp = m.created_at.strftime("%H:%M")
-        author = m.author.display_name
-        content = m.clean_content
+        author    = m.author.display_name
+        content   = m.clean_content
         lines.append(f"[{timestamp}] {author}: {content}")
     return (
         "Summarize the following Discord conversation in 4-6 bullet points.\n\n"
