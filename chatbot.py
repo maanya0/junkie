@@ -160,7 +160,42 @@ dynamic:
         except Exception as e:
             return f"Tool failed: {e}"
     return text
+# ---------- inside chatbot.py ----------
+async def write_tool(name: str, description: str, ctx: discord.Context) -> str:
+    """
+    Ask the LLM to generate a complete async function + schema,
+    then auto-register it.
+    """
+    prompt = f"""
+Write a complete, self-contained async Python function named `{name}` that:
+{description}
 
+Requirements:
+- async def {name}(...):  (add ctx param if you need to send messages)
+- return string (URL, text, or empty string)
+- use only std-lib + aiohttp + os + json
+- put no comments, no explanation, only code
+- add {"tool": "{name}", ...} schema line at top as comment
+Example format:
+#schema: {{"tool": "gif_post", "query": "string"}}
+async def gif_post(query): ...
+"""
+    resp = await client.chat.completions.create(
+        model="moonshotai/kimi-k2-instruct",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=500,
+        stop=["\n\n"]
+    )
+    raw = resp.choices[0].message.content.strip()
+
+    # split schema line + code
+    schema_line, code = raw.split("\n", 1)
+    schema = json.loads(schema_line.replace("#schema:", "").strip())
+
+    # save to Redis
+    await _save_tool(name, json.dumps(schema), code)
+    return f"Tool `{name}` auto-generated and registered."
 # ---------- discord ----------
 def setup_chat(bot):
     @bot.command(name=".")
