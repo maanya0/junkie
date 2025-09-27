@@ -206,3 +206,9 @@ def setup_chat(bot):
         await r.delete(REDIS_KEY)
         await r.close()
         await ctx.send("🧠 Memory wiped.", delete_after=5)
+
+    @bot.command(name="ping")
+    async def forget_cmd(ctx):
+        if ctx.author.id != bot.bot.user.id:
+            return
+        await ctx.send("Pong", delete_after=5)
