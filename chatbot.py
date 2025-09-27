@@ -174,7 +174,7 @@ def setup_chat(bot):
             memory.append({"role": "assistant", "content": reply})
             await _save_mem(memory)
         print(f"[GIF-DEBUG] reply = {repr(reply)}")   # debug
-        await ctx.send(reply)                          # raw URL → Discord embeds
+        await ctx.send(f"**🤖 {reply}**")                       # raw URL → Discord embeds
 
     @bot.command(name="fgt")
     async def forget_cmd(ctx):
