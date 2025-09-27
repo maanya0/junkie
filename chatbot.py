@@ -43,7 +43,7 @@ def _trim(mem: list, budget: int) -> list:
 # -----------------------------------
 
 def setup_chat(bot):
-    @bot.command("chat")
+    @bot.command("c")
     async def chat(ctx, *, prompt: str):
         if ctx.author.id != bot.bot.user.id:
             return
@@ -74,7 +74,7 @@ def setup_chat(bot):
             reply = reply[:1900] + "…"
         await ctx.send(f"**🤖 {reply}**")
 
-    @bot.command("forget")
+    @bot.command("fgt")
     async def forget(ctx):
         if ctx.author.id != bot.bot.user.id:
             return
