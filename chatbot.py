@@ -65,7 +65,53 @@ async def _list_tools() -> list[tuple[str, str]]:
         tools.append((k.decode().split(":", 1)[1], t["schema"]))
     await r.close()
     return tools
+async def write_tool(name: str, description: str, ctx: commands.Context) -> str:
+    """
+    Ask the LLM to generate a complete async function + schema,
+    then auto-register it after testing.
+    """
+    prompt = f"""
+Write a complete, self-contained async Python function named `{name}` that:
+{description}
 
+Requirements:
+- async def {name}(...):  (add ctx param if you need to send messages)
+- return string (URL, text, or empty string)
+- use only std-lib + aiohttp + os + json
+- put no comments, no explanation, only code
+- add {"tool": "{name}", ...} schema line at top as comment
+Example format:
+#schema: {{"tool": "gif_post", "query": "string"}}
+async def gif_post(query): ...
+"""
+    resp = await client.chat.completions.create(
+        model="moonshotai/kimi-k2-instruct",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=500,
+        stop=["\n\n"]
+    )
+    raw = resp.choices[0].message.content.strip()
+
+    # split schema line + code
+    schema_line, code = raw.split("\n", 1)
+    schema = json.loads(schema_line.replace("#schema:", "").strip())
+
+    # Save to testing environment
+    await _save_test_tool(name, json.dumps(schema), code)
+
+    # Test the tool with a simple query
+    test_query = "test"
+    if await _test_tool(name, test_query):
+        # Move from testing to main registry
+        await _save_tool(name, json.dumps(schema), code)
+        return f"Tool `{name}` registered and tested successfully."
+    else:
+        # Remove the tool if test fails
+        r = redis.from_url(os.getenv("REDIS_URL"))
+        await r.delete(f"{TESTING_KEY}:{name}")
+        await r.close()
+        return f"Tool `{name}` failed the test and was not registered."
 async def _exec_tool(name: str, kwargs: dict, ctx: commands.Context) -> str:
     t = await _load_tool(name)
     if not t:
@@ -105,7 +151,32 @@ async def python_exec(code: str) -> str:
         return out.getvalue() or "✅ executed (no output)"
     except Exception as e:
         return f"Python error: {e}"
+# ---------- testing environment ----------
+TESTING_KEY = "selfbot:testing"
 
+async def _save_test_tool(name: str, schema: str, code: str):
+    r = redis.from_url(os.getenv("REDIS_URL"))
+    await r.set(f"{TESTING_KEY}:{name}", json.dumps({"schema": schema, "code": code}))
+    await r.close()
+
+async def _load_test_tool(name: str) -> dict:
+    r = redis.from_url(os.getenv("REDIS_URL"))
+    raw = await r.get(f"{TESTING_KEY}:{name}")
+    await r.close()
+    return json.loads(raw) if raw else None
+
+async def _test_tool(name: str, test_query: str) -> bool:
+    t = await _load_test_tool(name)
+    if not t:
+        return False
+    loc = {}
+    exec(t["code"], globals(), loc)
+    func = loc[name]
+    try:
+        result = await func(test_query)
+        return bool(result)  # simple truthiness check
+    except Exception as e:
+        return False
 # ---------- agent ----------
 async def agent_turn(user_text: str, memory: list, ctx: commands.Context) -> str:
     dyn = await _list_tools()
