@@ -13,7 +13,7 @@ from selfbot import SelfBot
 
 client = AsyncOpenAI(
     base_url="https://api.groq.com/openai/v1",
-    api_key=os.getenv("GROQ_API_KEY")
+    api_key=os.getenv("OPENAI_API_KEY")
 )
 
 # ──────────────────────────────────────────────
@@ -23,9 +23,7 @@ client = AsyncOpenAI(
 def setup_tldr(bot: SelfBot):
     @bot.command("tldr")
     async def tldr(ctx, count: int = 50):
-        if ctx.author.id != bot.bot.user.id:
-            return
-
+        # Allow anyone to use the command
         await ctx.message.delete(delay=1.5)
 
         messages = await _fetch_recent_messages(ctx, count)
