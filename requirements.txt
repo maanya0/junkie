@@ -1,5 +1,5 @@
-
 redis>=5.0
+serpapi>=1.0     # google search wrapper
 # Core Discord library for self-bots
 discord.py-self>=2.0.0
 
