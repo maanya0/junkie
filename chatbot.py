@@ -3,6 +3,7 @@ import os, json, discord, redis.asyncio as redis, aiohttp, re
 from datetime import datetime
 from openai import AsyncOpenAI
 from serpapi import GoogleSearch
+from discord.ext import commands
 
 client = AsyncOpenAI(
     base_url="https://api.groq.com/openai/v1",
@@ -64,8 +65,9 @@ async def _list_tools() -> list[tuple[str, str]]:
         tools.append((k.decode().split(":", 1)[1], t["schema"]))
     await r.close()
     return tools
+    
 
-async def _exec_tool(name: str, kwargs: dict, ctx: discord.Context) -> str:
+async def _exec_tool(name: str, kwargs: dict, ctx: commands.Context) -> str:
     t = await _load_tool(name)
     if not t:
         return f"Tool `{name}` not found."
@@ -107,7 +109,7 @@ async def python_exec(code: str) -> str:
         return f"Python error: {e}"
 
 # ---------- agent ----------
-async def agent_turn(user_text: str, memory: list, ctx: discord.Context) -> str:
+async def agent_turn(user_text: str, memory: list, ctx: commands.Context) -> str:
     dyn = await _list_tools()
     dyn_desc = "\n".join(f"- {n}: {s}" for n, s in dyn)
     tool_desc = f"""
