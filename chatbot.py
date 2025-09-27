@@ -43,7 +43,7 @@ def _trim(mem: list, budget: int) -> list:
 # -----------------------------------
 
 def setup_chat(bot):
-    @bot.command("c")
+    @bot.command(".")
     async def chat(ctx, *, prompt: str):
         if ctx.author.id != bot.bot.user.id:
             return
