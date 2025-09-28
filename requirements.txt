@@ -17,3 +17,4 @@ asyncio>=3.4.3
 datetime>=4.3.0
 
 audioop-lts
+langchain-community>=0.0.20   # 1000+ pre-built tools
