@@ -68,33 +68,31 @@ async def ask_junkie(user_text: str, memory: list) -> str:
 
 # ---------- discord ----------
 def setup_chat(bot):
-    # ---------- manual listener for .chat ----------
+    # ---------- manual listener for .chat (any user) ----------
     @bot.event
-    async def on_message(message: discord.Message):
-        # 1. ignore ourselves
+    async def on_message(message):
+        # 1. let the framework handle *all* self-messages
         if message.author.id == bot.bot.user.id:
-            await bot.bot.process_commands(message)   # let framework handle .fgt etc.
+            await bot.bot.process_commands(message)
             return
 
-        # 2. only react to messages starting with ".chat"
-        if not message.content.startswith("."):
-            return
+        # 2. handle public .chat
+        if message.content.startswith(".chat "):
+            prompt = message.content[6:].strip()
+            if not prompt:
+                return
 
-        prompt = message.content[6:].strip()
-        if not prompt:
-            return
+            async with message.channel.typing():
+                mem = await _load_mem(message.channel.id)
+                mem.append({"role": "user", "content": prompt})
+                reply = await ask_junkie(prompt, mem)
+                mem.append({"role": "assistant", "content": reply})
+                await _save_mem(message.channel.id, mem)
 
-        async with message.channel.typing():
-            mem = await _load_mem(message.channel.id)
-            mem.append({"role": "user", "content": prompt})
-            reply = await ask_junkie(prompt, mem)
-            mem.append({"role": "assistant", "content": reply})
-            await _save_mem(message.channel.id, mem)
+            for chunk in [reply[i:i+1900] for i in range(0, len(reply), 1900)]:
+                await message.channel.send(f"**🤖 Junkie:**\n{chunk}")
 
-        for chunk in [reply[i:i+1900] for i in range(0, len(reply), 1900)]:
-            await message.channel.send(f"**🤖 Junkie:**\n{chunk}")
-
-    # ---------- framework-based .fgt (still self-only) ----------
+    # ---------- framework-based .fgt (self only) ----------
     @bot.command(name="fgt")
     async def forget_cmd(ctx):
         if ctx.author.id != ctx.bot.user.id:
