@@ -96,6 +96,17 @@ def setup_chat(bot):
 
             for chunk in [reply[i:i+1900] for i in range(0, len(reply), 1900)]:
                 await message.channel.send(f"**🤖 Junkie:**\n{chunk}")
+    
+    @bot.command(name="chat")          # invoked by  .chat  (prefix = ".")
+    async def chat_cmd(ctx, *, prompt: str):
+        async with ctx.typing():
+            memory = await _load_mem()
+            memory.append({"role": "user", "content": prompt})
+            reply  = await ask_junkie(prompt, memory)
+            memory.append({"role": "assistant", "content": reply})
+            await _save_mem(memory)
+        for chunk in [reply[i:i+1900] for i in range(0, len(reply), 1900)]:
+            await ctx.send(f"**🤖 Junkie:**\n{chunk}")
 
     # ---------- framework-based .fgt (self only) ----------
     @bot.command(name="fgt")
