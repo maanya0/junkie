@@ -72,14 +72,18 @@ def setup_chat(bot):
     # ---------- manual listener for .chat (any user) ----------
     @bot.event
     async def on_message(message):
-        # 1. let the framework handle *all* self-messages
+        # 1. ignore everything that does NOT start with the prefix
+        if not message.content.startswith(bot.prefix):
+            return
+
+        # 2. let the framework handle *all* prefixed self-messages
         if message.author.id == bot.bot.user.id:
             await bot.bot.process_commands(message)
             return
 
-        # 2. handle public .chat
-        if message.content.startswith(".chat "):
-            prompt = message.content[6:].strip()
+        # 3. handle public ".chat" command
+        if message.content.startswith(f"{bot.prefix}. "):
+            prompt = message.content[len(f"{bot.prefix}. "):].strip()
             if not prompt:
                 return
 
