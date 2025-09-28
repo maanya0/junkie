@@ -69,33 +69,18 @@ async def ask_junkie(user_text: str, memory: list) -> str:
 
 # ---------- discord ----------
 def setup_chat(bot):
-    # ---------- manual listener for .chat (any user) ----------
-    @bot.event
-    async def on_message(message):
-        # 1. ignore everything that does NOT start with the prefix
-        if not message.content.startswith(bot.prefix):
-            return
+    # ---------- normal command, open to everyone ----------
+    @bot.command(name=".")
+    async def chat_cmd(ctx, *, prompt: str):
+        async with ctx.typing():
+            mem = await _load_mem(ctx.channel.id)
+            mem.append({"role": "user", "content": prompt})
+            reply = await ask_junkie(prompt, mem)
+            mem.append({"role": "assistant", "content": reply})
+            await _save_mem(ctx.channel.id, mem)
 
-        # 2. let the framework handle *all* prefixed self-messages
-        if message.author.id == bot.bot.user.id:
-            await bot.bot.process_commands(message)
-            return
-
-        # 3. handle public ".chat" command
-        if message.content.startswith(f"{bot.prefix}. "):
-            prompt = message.content[len(f"{bot.prefix}. "):].strip()
-            if not prompt:
-                return
-
-            async with message.channel.typing():
-                mem = await _load_mem(message.channel.id)
-                mem.append({"role": "user", "content": prompt})
-                reply = await ask_junkie(prompt, mem)
-                mem.append({"role": "assistant", "content": reply})
-                await _save_mem(message.channel.id, mem)
-
-            for chunk in [reply[i:i+1900] for i in range(0, len(reply), 1900)]:
-                await message.channel.send(f"**🤖 Junkie:**\n{chunk}")
+        for chunk in [reply[i:i+1900] for i in range(0, len(reply), 1900)]:
+            await ctx.send(f"**🤖 Junkie:**\n{chunk}")
 
     # ---------- framework-based .fgt (self only) ----------
     @bot.command(name="fgt")
