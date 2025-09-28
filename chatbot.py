@@ -67,21 +67,37 @@ async def ask_junkie(user_text: str, memory: list) -> str:
 
 # ---------- discord ----------
 def setup_chat(bot):
-    @bot.command(name=".")          # .chat <prompt>
-    async def chat_cmd(ctx, *, prompt: str):
-        async with ctx.typing():
-            mem = await _load_mem(ctx.channel.id)
+    # ---------- manual listener for .chat ----------
+    @bot.event
+    async def on_message(message: discord.Message):
+        # 1. ignore ourselves
+        if message.author.id == bot.bot.user.id:
+            await bot.bot.process_commands(message)   # let framework handle .fgt etc.
+            return
+
+        # 2. only react to messages starting with ".chat"
+        if not message.content.startswith("."):
+            return
+
+        prompt = message.content[6:].strip()
+        if not prompt:
+            return
+
+        async with message.channel.typing():
+            mem = await _load_mem(message.channel.id)
             mem.append({"role": "user", "content": prompt})
             reply = await ask_junkie(prompt, mem)
             mem.append({"role": "assistant", "content": reply})
-            await _save_mem(ctx.channel.id, mem)
+            await _save_mem(message.channel.id, mem)
 
-        # split long replies
         for chunk in [reply[i:i+1900] for i in range(0, len(reply), 1900)]:
-            await ctx.send(f"**🤖 Junkie:**\n{chunk}")
+            await message.channel.send(f"**🤖 Junkie:**\n{chunk}")
 
-    @bot.command(name="fgt")           # .fgt  → wipe memory
+    # ---------- framework-based .fgt (still self-only) ----------
+    @bot.command(name="fgt")
     async def forget_cmd(ctx):
+        if ctx.author.id != ctx.bot.user.id:
+            return
         r = redis.from_url(REDIS_URL)
         await r.delete(_key(ctx.channel.id))
         await r.close()
