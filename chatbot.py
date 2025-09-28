@@ -1,5 +1,6 @@
 # chatbot.py  –  public, redis-backed chat for discord.py-self
 import os
+import discord
 import json
 import redis.asyncio as redis
 from openai import AsyncOpenAI
