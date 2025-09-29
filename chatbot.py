@@ -78,33 +78,40 @@ async def ask_junkie(user_text: str, memory: list) -> str:
     msgs.extend(_trim(memory, MAX_TOKENS))
     msgs.append({"role": "user", "content": user_text})
 
-    # 2-round tool loop
-    for _ in range(2):
-        response = await client.chat.completions.create(
-            model="moonshotai/kimi-k2-instruct",
-            messages=msgs,
-            temperature=0.3,
-            max_tokens=800
-        )
-        text = response.choices[0].message.content.strip()
+    # first call
+    resp = await client.chat.completions.create(
+        model="moonshotai/kimi-k2-instruct",
+        messages=msgs,
+        temperature=0.3,
+        max_tokens=800
+    )
+    text = resp.choices[0].message.content.strip()
 
-        if text.startswith("{") and text.endswith("}"):
-            try:
-                call = json.loads(text)
-                tool = call.get("tool")
-                if tool == "search_google":
-                    res = await google_search(call["query"])
-                    msgs.append({"role": "system", "content": f"Web results:\n{res}"})
-                    continue
-                if tool == "fetch_url":
-                    res = await fetch_url(call["url"])
-                    msgs.append({"role": "system", "content": f"Page content:\n{res}"})
-                    continue
-            except Exception:
-                pass
-        break  # no more tools
+    # if it’s a tool call, execute once and **always** call LLM again
+    if text.startswith("{") and text.endswith("}"):
+        try:
+            call = json.loads(text)
+            tool = call.get("tool")
+            if tool == "search_google":
+                res = await google_search(call["query"])
+                msgs.append({"role": "assistant", "content": text})   # keep the JSON
+                msgs.append({"role": "system", "content": f"Web results:\n{res}"})
+            elif tool == "fetch_url":
+                res = await fetch_url(call["url"])
+                msgs.append({"role": "assistant", "content": text})
+                msgs.append({"role": "system", "content": f"Page content:\n{res}"})
+
+            # **mandatory** second call → plain answer
+            resp2 = await client.chat.completions.create(
+                model="moonshotai/kimi-k2-instruct",
+                messages=msgs,
+                temperature=0.3,
+                max_tokens=800
+            )
+            text = resp2.choices[0].message.content.strip()
+        except Exception:
+            pass
     return text
-
 # ---------- discord ----------
 def setup_chat(bot):
     @bot.event
