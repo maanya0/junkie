@@ -23,7 +23,6 @@ async def google_search(query: str, num: int = 3) -> str:
     search = GoogleSearch({"q": query, "engine": "google", "num": num, "api_key": SERPER_KEY})
     data = search.get_dict()
     results = data.get("organic_results", [])
-    print("[Serper raw]", data)   # ← add this after data = search.get_dict()
     return "\n".join(f"{i+1}. {r['title']} – {r['snippet']}" for i, r in enumerate(results)) or "No results."
 
 async def fetch_url(url: str) -> str:
