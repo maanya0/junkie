@@ -114,6 +114,7 @@ async def ask_junkie(user_text: str, memory: list) -> str:
         except Exception:
             pass
     return text
+    
     # ---------- discord ----------
 def setup_chat(bot):
     @bot.event
