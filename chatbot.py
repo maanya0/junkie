@@ -46,7 +46,8 @@ You are Junkie Companion, a helpful Discord assistant.
   - {"tool": "fetch_url", "url": "<full url>"}
   Reply with **only** the JSON block to call a tool; otherwise answer normally.
 - Remain accurate, friendly, and unbiased.
-- Always crosscheck your information , with help of webtools you have been proided"
+- Always crosscheck your information , with help of webtools you have been proided
+- After you receive web results, **summarise them** in plain English—do not claim you cannot provide real-time data.
 """.strip()
 
 # ---------- redis helpers ----------
