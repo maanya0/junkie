@@ -46,6 +46,7 @@ You are Junkie Companion, a helpful Discord assistant.
   - {"tool": "fetch_url", "url": "<full url>"}
   Reply with **only** the JSON block to call a tool; otherwise answer normally.
 - Remain accurate, friendly, and unbiased.
+- Always crosscheck your information , with help of webtools you have been proided"
 """.strip()
 
 # ---------- redis helpers ----------
@@ -74,11 +75,10 @@ def _trim(mem, budget):
 
 # ---------- llm with auto-web ----------
 async def ask_junkie(user_text: str, memory: list) -> str:
-       msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
+    msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
     msgs.extend(_trim(memory, MAX_TOKENS))
     msgs.append({"role": "user", "content": user_text})
 
-    # first call
     resp = await client.chat.completions.create(
         model="moonshotai/kimi-k2-instruct",
         messages=msgs,
@@ -87,21 +87,19 @@ async def ask_junkie(user_text: str, memory: list) -> str:
     )
     text = resp.choices[0].message.content.strip()
 
-    # if it’s a tool call, execute once and **always** call LLM again
     if text.startswith("{") and text.endswith("}"):
         try:
             call = json.loads(text)
             tool = call.get("tool")
             if tool == "search_google":
                 res = await google_search(call["query"])
-                msgs.append({"role": "assistant", "content": text})   # keep the JSON
+                msgs.append({"role": "assistant", "content": text})
                 msgs.append({"role": "system", "content": f"Web results:\n{res}"})
             elif tool == "fetch_url":
                 res = await fetch_url(call["url"])
                 msgs.append({"role": "assistant", "content": text})
                 msgs.append({"role": "system", "content": f"Page content:\n{res}"})
 
-            # **mandatory** second call → plain answer
             resp2 = await client.chat.completions.create(
                 model="moonshotai/kimi-k2-instruct",
                 messages=msgs,
