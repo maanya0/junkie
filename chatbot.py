@@ -74,7 +74,7 @@ def _trim(mem, budget):
 
 # ---------- llm with auto-web ----------
 async def ask_junkie(user_text: str, memory: list) -> str:
-    msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
+       msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
     msgs.extend(_trim(memory, MAX_TOKENS))
     msgs.append({"role": "user", "content": user_text})
 
