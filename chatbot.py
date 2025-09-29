@@ -80,7 +80,7 @@ async def ask_junkie(user_text: str, memory: list) -> str:
     msgs.append({"role": "user", "content": user_text})
 
     resp = await client.chat.completions.create(
-        model="llama-3.1-70b-versatile",   # instead of moonshotai/kimi-k2-instruct,
+        model="llama-3.1-8b-instant",   # instead of llama-3.1-70b-versatile,   # instead of moonshotai/kimi-k2-instruct,
         messages=msgs,
         temperature=0.3,
         max_tokens=800
@@ -101,7 +101,7 @@ async def ask_junkie(user_text: str, memory: list) -> str:
                 msgs.append({"role": "system", "content": f"Page content:\n{res}"})
 
             resp2 = await client.chat.completions.create(
-                model="moonshotai/kimi-k2-instruct",
+                model="llama-3.1-8b-instant",   # instead of llama-3.1-70b-versatile,
                 messages=msgs,
                 temperature=0.3,
                 max_tokens=800
