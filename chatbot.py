@@ -1,24 +1,50 @@
-# chatbot.py  –  public, redis-backed chat for discord.py-self
+# chatbot.py  –  public, redis-backed chat for discord.py-self  (auto-web)
 import os
 import discord
 import json
 import redis.asyncio as redis
+import aiohttp
+import re
 from openai import AsyncOpenAI
+from serpapi import GoogleSearch
 
 REDIS_URL  = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 TOK        = lambda t: len(t.encode()) // 4
 MAX_TOKENS = 4_000
+SERPER_KEY = os.getenv("SERPER_API_KEY")
 
 client = AsyncOpenAI(
-    base_url="https://api.groq.com/openai/v1",
+    base_url="https://api.groq.com/openai/v1 ",
     api_key=os.getenv("GROQ_API_KEY")
 )
+
+# ---------- web tools ----------
+async def google_search(query: str, num: int = 3) -> str:
+    search = GoogleSearch({"q": query, "engine": "google", "num": num, "api_key": SERPER_KEY})
+    data = search.get_dict()
+    results = data.get("organic_results", [])
+    return "\n".join(f"{i+1}. {r['title']} – {r['snippet']}" for i, r in enumerate(results)) or "No results."
+
+async def fetch_url(url: str) -> str:
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s:
+            async with s.get(url, headers={"User-Agent": "selfbot-agent/1.0"}) as r:
+                text = await r.text()
+                text = re.sub(r"<[^>]+>", "", text)
+                text = re.sub(r"\s+", " ", text)
+                return text[:3_000]
+    except Exception as e:
+        return f"Fetch error: {e}"
 
 SYSTEM_PROMPT = """
 You are Junkie Companion, a helpful Discord assistant.
 - Default to **short, plain-language** answers (1-2 paragraphs or a few bullets).
 - Add markdown, headings, tables, code blocks, LaTeX **only** if the user appends `--long` to their query.
 - When brief, end with: “Ask `--long` for details.”
+- You may use these tools automatically when needed:
+  - {"tool": "search_google", "query": "<terms>"}
+  - {"tool": "fetch_url", "url": "<full url>"}
+  Reply with **only** the JSON block to call a tool; otherwise answer normally.
 - Remain accurate, friendly, and unbiased.
 """.strip()
 
@@ -46,52 +72,61 @@ def _trim(mem, budget):
         out.insert(0, m)
     return out
 
-# ---------- llm ----------
+# ---------- llm with auto-web ----------
 async def ask_junkie(user_text: str, memory: list) -> str:
     msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
     msgs.extend(_trim(memory, MAX_TOKENS))
     msgs.append({"role": "user", "content": user_text})
 
-    response = await client.chat.completions.create(
-        model="moonshotai/kimi-k2-instruct",
-        messages=msgs,
-        temperature=0.3,
-        max_tokens=800
-    )
-    return response.choices[0].message.content.strip()
+    # 2-round tool loop
+    for _ in range(2):
+        response = await client.chat.completions.create(
+            model="moonshotai/kimi-k2-instruct",
+            messages=msgs,
+            temperature=0.3,
+            max_tokens=800
+        )
+        text = response.choices[0].message.content.strip()
+
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                call = json.loads(text)
+                tool = call.get("tool")
+                if tool == "search_google":
+                    res = await google_search(call["query"])
+                    msgs.append({"role": "system", "content": f"Web results:\n{res}"})
+                    continue
+                if tool == "fetch_url":
+                    res = await fetch_url(call["url"])
+                    msgs.append({"role": "system", "content": f"Page content:\n{res}"})
+                    continue
+            except Exception:
+                pass
+        break  # no more tools
+    return text
 
 # ---------- discord ----------
 def setup_chat(bot):
-    # ---------- manual listener for .chat (any user) ----------
     @bot.event
     async def on_message(message):
-        # 1. ignore everything that does NOT start with the prefix
         if not message.content.startswith(bot.prefix):
             return
-
-        # 2. let the framework handle *all* prefixed self-messages
         if message.author.id == bot.bot.user.id:
             await bot.bot.process_commands(message)
             return
-
-        # 3. handle public ".chat" command
         if message.content.startswith(f"{bot.prefix}"):
             prompt = message.content[len(f"{bot.prefix}"):].strip()
             if not prompt:
                 return
-
             async with message.channel.typing():
                 mem = await _load_mem(message.channel.id)
                 mem.append({"role": "user", "content": prompt})
                 reply = await ask_junkie(prompt, mem)
                 mem.append({"role": "assistant", "content": reply})
                 await _save_mem(message.channel.id, mem)
-
             for chunk in [reply[i:i+1900] for i in range(0, len(reply), 1900)]:
                 await message.channel.send(f"**🤖 Junkie:**\n{chunk}")
-    
 
-    # ---------- framework-based .fgt (self only) ----------
     @bot.command(name="fgt")
     async def forget_cmd(ctx):
         if ctx.author.id != ctx.bot.user.id:
