@@ -79,29 +79,32 @@ async def ask_junkie(user_text: str, memory: list) -> str:
     msgs.extend(_trim(memory, MAX_TOKENS))
     msgs.append({"role": "user", "content": user_text})
 
+    # first call
     resp = await client.chat.completions.create(
-        model="llama-3.1-8b-instant",   # instead of llama-3.1-70b-versatile,   # instead of moonshotai/kimi-k2-instruct,
+        model="llama-3.1-8b-instant",   # ← use active Groq model
         messages=msgs,
         temperature=0.3,
         max_tokens=800
     )
     text = resp.choices[0].message.content.strip()
 
+    # if it’s a tool call, execute once and **always** call LLM again
     if text.startswith("{") and text.endswith("}"):
         try:
             call = json.loads(text)
             tool = call.get("tool")
             if tool == "search_google":
                 res = await google_search(call["query"])
-                msgs.append({"role": "assistant", "content": text})
+                msgs.append({"role": "assistant", "content": text})   # keep the JSON
                 msgs.append({"role": "system", "content": f"Web results:\n{res}"})
             elif tool == "fetch_url":
                 res = await fetch_url(call["url"])
                 msgs.append({"role": "assistant", "content": text})
                 msgs.append({"role": "system", "content": f"Page content:\n{res}"})
 
+            # **mandatory** second call → plain answer
             resp2 = await client.chat.completions.create(
-                model="llama-3.1-8b-instant",   # instead of llama-3.1-70b-versatile,
+                model="llama-3.1-8b-instant",
                 messages=msgs,
                 temperature=0.3,
                 max_tokens=800
@@ -110,7 +113,7 @@ async def ask_junkie(user_text: str, memory: list) -> str:
         except Exception:
             pass
     return text
-# ---------- discord ----------
+    # ---------- discord ----------
 def setup_chat(bot):
     @bot.event
     async def on_message(message):
