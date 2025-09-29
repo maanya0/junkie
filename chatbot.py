@@ -14,7 +14,7 @@ MAX_TOKENS = 4_000
 SERPER_KEY = os.getenv("SERPER_API_KEY")
 
 client = AsyncOpenAI(
-    base_url="https://api.groq.com/openai/v1 ",
+    base_url="https://api.groq.com/openai/v1",
     api_key=os.getenv("GROQ_API_KEY")
 )
 
