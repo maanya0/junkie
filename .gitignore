@@ -1,0 +1,37 @@
+# Environment files
+.env
+.env.*
+!.env.sample
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# pre-commit
+.pre-commit-config.yaml
+
+# Tool caches
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Package/build artifacts
+build/
+dist/
+*.egg-info/
+
+# Editors/OS
+.DS_Store
+Thumbs.db
+
+# Virtual environments
+.venv/
+venv/
+
+# Node/JS (if present)
+node_modules/
+
