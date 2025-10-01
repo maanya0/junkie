@@ -23,4 +23,5 @@ COPY . .
 EXPOSE 6379
 
 # Default command (can be overridden)
-CMD ["python", "main.py"]
+# Start Redis and then the app
+CMD ["bash", "-lc", "redis-server --daemonize yes && python main.py"]
