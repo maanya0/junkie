@@ -1,25 +1,27 @@
-#tldr.py
+# tldr.py
 
 
 import os
-from datetime import datetime
 
-import discord
+from dotenv import load_dotenv
 from openai import AsyncOpenAI
+
 from selfbot import SelfBot
 
 # ──────────────────────────────────────────────
 # LLM Client (Groq / OpenAI-compatible)
 # ──────────────────────────────────────────────
 
+load_dotenv()
 client = AsyncOpenAI(
-    base_url="https://api.groq.com/openai/v1",   # ← no spaces
-    api_key=os.getenv("GROQ_API_KEY")
+    base_url="https://api.groq.com/openai/v1",  # ← no spaces
+    api_key=os.getenv("GROQ_API_KEY"),
 )
 
 # ──────────────────────────────────────────────
 # Public API: Setup TL;DR Command
 # ──────────────────────────────────────────────
+
 
 def setup_tldr(bot: SelfBot):
     @bot.command("tldr")
@@ -35,18 +37,21 @@ def setup_tldr(bot: SelfBot):
         for chunk in _chunk_text(summary):
             await ctx.send(f"**TL;DR:**\n{chunk}")
 
+
 # ──────────────────────────────────────────────
 # Internal Helpers
 # ──────────────────────────────────────────────
 
+
 async def _fetch_recent_messages(ctx, count: int = 50, skip_existing_tldr: bool = True):
     try:
         messages = [
-            m async for m in ctx.channel.history(limit=count)
+            m
+            async for m in ctx.channel.history(limit=count)
             if not (
-                skip_existing_tldr and
-                m.author.id == ctx.bot.user.id and
-                "**TL;DR:**" in m.content
+                skip_existing_tldr
+                and m.author.id == ctx.bot.user.id
+                and "**TL;DR:**" in m.content
             )
         ]
         messages.reverse()
@@ -54,6 +59,7 @@ async def _fetch_recent_messages(ctx, count: int = 50, skip_existing_tldr: bool 
     except Exception as e:
         await ctx.send(f"Could not fetch history: {e}", delete_after=10)
         return []
+
 
 async def _summarize_messages(messages):
     prompt = _build_prompt(messages)
@@ -67,6 +73,7 @@ async def _summarize_messages(messages):
     except Exception as e:
         return f"OpenAI error: {e}"
 
+
 def _build_prompt(messages):
     lines = []
     for m in messages:
@@ -79,5 +86,6 @@ def _build_prompt(messages):
         + "\n".join(lines)
     )
 
+
 def _chunk_text(text, size: int = 1800):
-    return [text[i:i + size] for i in range(0, len(text), size)]
+    return [text[i : i + size] for i in range(0, len(text), size)]

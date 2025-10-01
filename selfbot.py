@@ -1,13 +1,17 @@
 # selfbot.py  –  sees every message, only owner can trigger commands
 import os
+
 import discord
 from discord.ext import commands
+
 
 class SelfBot:
     def __init__(self, *, token: str = None, prefix: str = "!"):
         self.token = token or os.getenv("DISCORD_TOKEN")
         if not self.token:
-            raise ValueError("Discord token must be provided either as argument or DISCORD_TOKEN env var.")
+            raise ValueError(
+                "Discord token must be provided either as argument or DISCORD_TOKEN env var."
+            )
 
         self.bot = commands.Bot(
             command_prefix=prefix,
