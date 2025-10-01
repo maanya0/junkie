@@ -22,3 +22,4 @@ pycountry
 wikipedia
 exa-py
 mcp
+pydantic<2.10
