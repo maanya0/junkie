@@ -10,19 +10,21 @@ import sys
 import aiohttp
 from agno.agent import Agent
 from agno.db.redis import RedisDb
+from agno.memory import MemoryManager
 from agno.models.groq import Groq
 from agno.models.openai import OpenAILike
+
+# tool imports
 from agno.tools import tool
 from agno.tools.calculator import CalculatorTools
 from agno.tools.exa import ExaTools
-
-# tool imports
 from agno.tools.googlesearch import GoogleSearchTools
 from agno.tools.mcp import MultiMCPTools
 from agno.tools.wikipedia import WikipediaTools
-from dotenv import load_dotenv
 
 # ---------- env ----------
+from dotenv import load_dotenv
+
 load_dotenv()
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 USE_REDIS = os.getenv("USE_REDIS", "false").lower() == "true"
@@ -49,6 +51,14 @@ else:
 
 # database (optional)
 db = RedisDb(db_url=REDIS_URL, memory_table="junkie_memories") if USE_REDIS else None
+
+
+# -------------memory manager-------------
+memory_manager = MemoryManager(
+    db=db,
+    # model used for memory creation and updates
+    model=Groq(id="openai/gpt-oss-120b"),
+)
 
 # ------------ observability -----------
 # run if env has TRACING=true
@@ -139,6 +149,7 @@ agno_agent = Agent(
     model=MODEL,
     # Add a database to the Agent
     db=db,
+    memory_manager=memory_manager,
     enable_user_memories=True,
     tools=[
         fetch_url,
