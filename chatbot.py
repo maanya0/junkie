@@ -31,34 +31,14 @@ USE_REDIS = os.getenv("USE_REDIS", "false").lower() == "true"
 
 # --------- model and provider -----------
 
-provider = "groq"  # default provider
+provider = os.getenv("CUSTOM_PROVIDER", "groq")  # default provider
 model_name = os.getenv("CUSTOM_MODEL", "openai/gpt-oss-120b")
-
-# If the user specifies a provider in the environment, use it
-provider = os.getenv("CUSTOM_PROVIDER", provider)
+SUPERMEMORY_KEY = os.getenv("SUPERMEMORY_API_KEY")
 customprovider_api_key = os.getenv("CUSTOM_PROVIDER_API_KEY", None)
-
-# Set up the model using the provider and model name
-if provider == "groq":
-    MODEL = Groq(id=model_name, max_tokens=4096)
-else:
-    MODEL = OpenAILike(
-        id=model_name,
-        base_url=provider,
-        max_tokens=4096,
-        api_key=customprovider_api_key,
-    )
 
 # database (optional)
 db = RedisDb(db_url=REDIS_URL, memory_table="junkie_memories") if USE_REDIS else None
 
-
-# -------------memory manager-------------
-memory_manager = MemoryManager(
-    db=db,
-    # model used for memory creation and updates
-    model=Groq(id="openai/gpt-oss-120b"),
-)
 
 # ------------ observability -----------
 # run if env has TRACING=true
@@ -157,41 +137,102 @@ Operating within Discord's communication constraints, the assistant must deliver
 
 """
 
-## main agent
 
-agno_agent = Agent(
-    name="Junkie",
-    model=MODEL,
-    # Add a database to the Agent
-    db=db,
-    memory_manager=memory_manager,
-    enable_user_memories=True,
-    tools=[
-        fetch_url,
-        GoogleSearchTools(),
-        WikipediaTools(),
-        CalculatorTools(),
-        ExaTools(),
-        mcp_tools,
-    ],
-    # Add the previous session history to the context
-    instructions=SYSTEM_PROMPT,
-    num_history_runs=5,
-    read_chat_history=True,
-    add_history_to_context=True,
-    add_datetime_to_context=True,
-    search_session_history=True,
-    # set max completion token length
-    retries=1,
-    reasoning=False,
-)
+# ---------- Model and Agent Factory ----------
+def create_model_and_agent(user_id: str):
+    """
+    Create a model and agent instance for a specific user.
+    
+    Args:
+        user_id (str): The Discord user ID
+        
+    Returns:
+        tuple: (model, agent) instances configured for the user
+    """
+    # Set up the model using the provider and model name
+    if provider == "groq":
+        model = Groq(
+            id=model_name, 
+            max_tokens=4096,
+            base_url="https://api.supermemory.ai/v3/https://api.groq.com/openai/v1",
+            client_params={
+                "default_headers": {
+                    "x-supermemory-api-key": SUPERMEMORY_KEY,
+                    "x-sm-user-id": user_id
+                }
+            }
+        )
+    else:
+        model = OpenAILike(
+            id=model_name,
+            base_url=provider,
+            max_tokens=4096,
+            api_key=customprovider_api_key,
+        )
+
+    # Create memory manager for this user
+    memory_manager = MemoryManager(
+        db=db,
+        # model used for memory creation and updates
+        model=Groq(id="openai/gpt-oss-120b"),
+    )
+
+    # Create agent for this user
+    agent = Agent(
+        name="Junkie",
+        model=model,
+        # Add a database to the Agent
+        # db=db,
+        # memory_manager=memory_manager,
+        # enable_user_memories=True,
+        tools=[
+            fetch_url,
+            GoogleSearchTools(),
+            WikipediaTools(),
+            CalculatorTools(),
+            ExaTools(),
+            mcp_tools,
+        ],
+        # Add the previous session history to the context
+        instructions=SYSTEM_PROMPT,
+        num_history_runs=5,
+        read_chat_history=True,
+        add_history_to_context=True,
+        add_datetime_to_context=True,
+        search_session_history=True,
+        # set max completion token length
+        retries=1,
+        reasoning=False,
+    )
+    
+    return model, agent
+
+
+# Cache for user agents to avoid recreating them on every message
+_user_agents = {}
+
+def get_or_create_agent(user_id: str):
+    """
+    Get existing agent for user or create a new one.
+    
+    Args:
+        user_id (str): The Discord user ID
+        
+    Returns:
+        Agent: Agent instance for the user
+    """
+    if user_id not in _user_agents:
+        _, agent = create_model_and_agent(user_id)
+        _user_agents[user_id] = agent
+    return _user_agents[user_id]
 
 
 # ---------- agno run helper (non-stream) ----------
 
 
 async def async_ask_junkie(user_text: str, user_id: str, session_id: str) -> str:
-    result = await agno_agent.arun(
+    agent = get_or_create_agent(user_id)
+    result = await agent.arun(
         input=user_text, user_id=user_id, session_id=session_id
     )
     return result.content
@@ -236,7 +277,9 @@ async def main():
     print("MCP tools connected")
     try:
         if sys.stdin and sys.stdin.isatty():
-            await agno_agent.acli_app()
+            # For CLI, use a default user_id
+            _, cli_agent = create_model_and_agent("cli_user")
+            await cli_agent.acli_app()
         else:
             print("Non-interactive environment detected; skipping CLI app.")
     finally:
