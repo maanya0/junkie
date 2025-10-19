@@ -269,7 +269,7 @@ def setup_chat(bot):
                     prompt, user_id=user_id, session_id=session_id
                 )
             for chunk in [reply[i : i + 1900] for i in range(0, len(reply), 1900)]:
-                await message.channel.send(f"**🤖 Junkie:**\n{chunk}")
+                await message.channel.send(f"**🗿 hero:**\n{chunk}")
 
 
 # Add this before running acli_app:
