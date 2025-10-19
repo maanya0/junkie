@@ -155,7 +155,7 @@ def create_model_and_agent(user_id: str):
             id=model_name, 
             max_tokens=4096,
             base_url="https://api.supermemory.ai/v3/https://api.groq.com/openai/v1",
-            api_key=os.getenv("GROQ_API_KEY", "")
+            api_key=os.getenv("GROQ_API_KEY", ""),
             client_params={
                 "default_headers": {
                     "x-supermemory-api-key": SUPERMEMORY_KEY,
