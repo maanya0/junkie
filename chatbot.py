@@ -183,7 +183,7 @@ def create_model_and_agent(user_id: str):
         name="Junkie",
         model=model,
         # Add a database to the Agent
-        # db=db,
+        db=db,
         # memory_manager=memory_manager,
         # enable_user_memories=True,
         tools=[
