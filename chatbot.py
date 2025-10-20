@@ -13,6 +13,7 @@ from agno.db.redis import RedisDb
 from agno.memory import MemoryManager
 from agno.models.groq import Groq
 from agno.models.openai import OpenAILike
+
 # tool imports
 from agno.tools import tool
 from agno.tools.calculator import CalculatorTools
@@ -139,6 +140,8 @@ Operating within Discord's communication constraints, the assistant must deliver
 - Keep track of user-specific facts based on their IDs.
 - When referring to a user, use '@Name(ID)' format.
 - Do not make up new IDs.
+- IMPORTANT: When responding, do NOT repeat the user's 'Name(ID):' prefix. Just provide your direct response.
+- Only use '@Name(ID)' format when actively mentioning/referring to a user, not when echoing their message.
 
 """
 
@@ -188,7 +191,6 @@ def create_model_and_agent(user_id: str):
     agent = Agent(
         name="Junkie",
         model=model,
-        #pre_hooks=[OpenAIModerationGuardrail()],
         # Add a database to the Agent
         db=db,
         # memory_manager=memory_manager,
@@ -263,21 +265,19 @@ def resolve_mentions(message):
 
 def restore_mentions(response, guild):
     """
-    Convert '@Name(12345)' back to real Discord mentions '<@12345>'.
+    Convert '@Name(12345)' or 'Name(12345)' back to real Discord mentions '<@12345>'.
     Handles variations like '@Name(ID)', '@Name (ID)', 'Name(ID)', etc.
     """
-    # Pattern 1: @Name(ID) - standard format
-    pattern1 = r"@([^\(\)]+?)\s*\((\d+)\)"
-    # Pattern 2: Name(ID) without @ at start of line or after certain characters
-    pattern2 = r"(?:^|(?<=\s))([A-Z][^\(\)]*?)\s*\((\d+)\)(?=\s*[:\-\.,]|\s*$)"
+    # Pattern: Matches both @Name(ID) and Name(ID) formats
+    # Captures the name (optional @) and the ID
+    pattern = r"@?([^\(\)<>]+?)\s*\((\d+)\)"
     
     def repl(match):
         user_id = match.group(2)
         return f"<@{user_id}>"
     
-    # Apply both patterns
-    response = re.sub(pattern1, repl, response)
-    response = re.sub(pattern2, repl, response)
+    # Apply pattern to replace all instances
+    response = re.sub(pattern, repl, response)
     return response
 
 def setup_chat(bot):
@@ -314,7 +314,7 @@ def setup_chat(bot):
                     formatted_prompt, user_id=user_id, session_id=session_id
                 )
 
-            # Step 4: convert '@Name(id)' → actual mentions
+            # Step 4: convert '@Name(id)' or 'Name(id)' → actual mentions
             final_reply = restore_mentions(reply, message.guild)
 
             # Step 5: send reply, splitting long ones
