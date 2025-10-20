@@ -13,7 +13,6 @@ from agno.db.redis import RedisDb
 from agno.memory import MemoryManager
 from agno.models.groq import Groq
 from agno.models.openai import OpenAILike
-from agno.guardrails import OpenAIModerationGuardrail
 # tool imports
 from agno.tools import tool
 from agno.tools.calculator import CalculatorTools
@@ -189,7 +188,7 @@ def create_model_and_agent(user_id: str):
     agent = Agent(
         name="Junkie",
         model=model,
-        pre_hooks=[OpenAIModerationGuardrail()],
+        #pre_hooks=[OpenAIModerationGuardrail()],
         # Add a database to the Agent
         db=db,
         # memory_manager=memory_manager,
