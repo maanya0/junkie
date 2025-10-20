@@ -1,6 +1,6 @@
-agno==2.0.11
-openai==1.109.1
-arize-phoenix==7.9.0
+agno
+openai
+arize-phoenix
 openinference-instrumentation-agno
 opentelemetry-sdk
 opentelemetry-exporter-otlp
