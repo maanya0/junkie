@@ -264,12 +264,21 @@ def resolve_mentions(message):
 def restore_mentions(response, guild):
     """
     Convert '@Name(12345)' back to real Discord mentions '<@12345>'.
+    Handles variations like '@Name(ID)', '@Name (ID)', 'Name(ID)', etc.
     """
-    pattern = r"@([^\(]+)\((\d+)\)"
+    # Pattern 1: @Name(ID) - standard format
+    pattern1 = r"@([^\(\)]+?)\s*\((\d+)\)"
+    # Pattern 2: Name(ID) without @ at start of line or after certain characters
+    pattern2 = r"(?:^|(?<=\s))([A-Z][^\(\)]*?)\s*\((\d+)\)(?=\s*[:\-\.,]|\s*$)"
+    
     def repl(match):
         user_id = match.group(2)
         return f"<@{user_id}>"
-    return re.sub(pattern, repl, response)
+    
+    # Apply both patterns
+    response = re.sub(pattern1, repl, response)
+    response = re.sub(pattern2, repl, response)
+    return response
 
 def setup_chat(bot):
     @bot.event
