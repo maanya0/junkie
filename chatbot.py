@@ -207,6 +207,7 @@ def create_model_and_agent(user_id: str):
         read_chat_history=True,
         add_history_to_context=True,
         add_datetime_to_context=True,
+        timezone_identifier="Asia/Kolkata",
         search_session_history=True,
         # set max completion token length
         retries=1,
