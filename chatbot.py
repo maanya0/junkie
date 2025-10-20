@@ -134,8 +134,15 @@ Operating within Discord's communication constraints, the assistant must deliver
    - Embed generated images using Markdown image syntax
    - Generate images with clear, descriptive prompts
    - Never use alternative image generation methods
+   
+## Additional instruction
+- Every message in the conversation starts with 'Name(ID): message'.
+- Keep track of user-specific facts based on their IDs.
+- When referring to a user, use '@Name(ID)' format.
+- Do not make up new IDs.
 
 """
+
 
 
 # ---------- Model and Agent Factory ----------
@@ -244,7 +251,25 @@ async def setup_mcp():
     await mcp_tools.connect()
     print("MCP tools connected")
     print(mcp_tools)
+    
+def resolve_mentions(message):
+    """
+    Replace <@12345> mentions with human-readable '@Name(12345)' for the model.
+    """
+    content = message.content
+    for user in message.mentions:
+        content = content.replace(f"<@{user.id}>", f"@{user.display_name}({user.id})")
+    return content
 
+def restore_mentions(response, guild):
+    """
+    Convert '@Name(12345)' back to real Discord mentions '<@12345>'.
+    """
+    pattern = r"@([^\(]+)\((\d+)\)"
+    def repl(match):
+        user_id = match.group(2)
+        return f"<@{user_id}>"
+    return re.sub(pattern, repl, response)
 
 def setup_chat(bot):
     @bot.event
@@ -253,23 +278,38 @@ def setup_chat(bot):
 
     @bot.event
     async def on_message(message):
-        if not message.content.startswith(bot.prefix):
+    if not message.content.startswith(bot.prefix):
+        return
+    if message.author.id == bot.bot.user.id:
+        await bot.bot.process_commands(message)
+        return
+
+    if message.content.startswith(f"{bot.prefix}"):
+        raw_prompt = message.content[len(f"{bot.prefix}"):].strip()
+        if not raw_prompt:
             return
-        if message.author.id == bot.bot.user.id:
-            await bot.bot.process_commands(message)
-            return
-        if message.content.startswith(f"{bot.prefix}"):
-            prompt = message.content[len(f"{bot.prefix}") :].strip()
-            if not prompt:
-                return
-            async with message.channel.typing():
-                user_id = str(message.author.id)
-                session_id = str(message.channel.id)
-                reply = await async_ask_junkie(
-                    prompt, user_id=user_id, session_id=session_id
-                )
-            for chunk in [reply[i : i + 1900] for i in range(0, len(reply), 1900)]:
-                await message.channel.send(f"**🗿 hero:**\n{chunk}")
+
+        # Step 1: replace mentions with readable form
+        processed_prompt = resolve_mentions(message)
+
+        # Step 2: prefix user identity for model clarity
+        user_label = f"{message.author.display_name}({message.author.id})"
+        formatted_prompt = f"{user_label}: {processed_prompt}"
+
+        # Step 3: run the agent (shared session per channel)
+        async with message.channel.typing():
+            user_id = str(message.author.id)
+            session_id = str(message.channel.id)
+            reply = await async_ask_junkie(
+                formatted_prompt, user_id=user_id, session_id=session_id
+            )
+
+        # Step 4: convert '@Name(id)' → actual mentions
+        final_reply = restore_mentions(reply, message.guild)
+
+        # Step 5: send reply, splitting long ones
+        for chunk in [final_reply[i:i+1900] for i in range(0, len(final_reply), 1900)]:
+            await message.channel.send(f"**🗿 hero:**\n{chunk}")
 
 
 # Add this before running acli_app:
