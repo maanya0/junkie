@@ -278,38 +278,38 @@ def setup_chat(bot):
 
     @bot.event
     async def on_message(message):
-    if not message.content.startswith(bot.prefix):
-        return
-    if message.author.id == bot.bot.user.id:
-        await bot.bot.process_commands(message)
-        return
-
-    if message.content.startswith(f"{bot.prefix}"):
-        raw_prompt = message.content[len(f"{bot.prefix}"):].strip()
-        if not raw_prompt:
+        if not message.content.startswith(bot.prefix):
+            return
+        if message.author.id == bot.bot.user.id:
+            await bot.bot.process_commands(message)
             return
 
-        # Step 1: replace mentions with readable form
-        processed_prompt = resolve_mentions(message)
+        if message.content.startswith(f"{bot.prefix}"):
+            raw_prompt = message.content[len(f"{bot.prefix}"):].strip()
+            if not raw_prompt:
+                return
 
-        # Step 2: prefix user identity for model clarity
-        user_label = f"{message.author.display_name}({message.author.id})"
-        formatted_prompt = f"{user_label}: {processed_prompt}"
+            # Step 1: replace mentions with readable form
+            processed_prompt = resolve_mentions(message)
 
-        # Step 3: run the agent (shared session per channel)
-        async with message.channel.typing():
-            user_id = str(message.author.id)
-            session_id = str(message.channel.id)
-            reply = await async_ask_junkie(
-                formatted_prompt, user_id=user_id, session_id=session_id
-            )
+            # Step 2: prefix user identity for model clarity
+            user_label = f"{message.author.display_name}({message.author.id})"
+            formatted_prompt = f"{user_label}: {processed_prompt}"
 
-        # Step 4: convert '@Name(id)' → actual mentions
-        final_reply = restore_mentions(reply, message.guild)
+            # Step 3: run the agent (shared session per channel)
+            async with message.channel.typing():
+                user_id = str(message.author.id)
+                session_id = str(message.channel.id)
+                reply = await async_ask_junkie(
+                    formatted_prompt, user_id=user_id, session_id=session_id
+                )
 
-        # Step 5: send reply, splitting long ones
-        for chunk in [final_reply[i:i+1900] for i in range(0, len(final_reply), 1900)]:
-            await message.channel.send(f"**🗿 hero:**\n{chunk}")
+            # Step 4: convert '@Name(id)' → actual mentions
+            final_reply = restore_mentions(reply, message.guild)
+
+            # Step 5: send reply, splitting long ones
+            for chunk in [final_reply[i:i+1900] for i in range(0, len(final_reply), 1900)]:
+                await message.channel.send(f"**🗿 hero:**\n{chunk}")
 
 
 # Add this before running acli_app:
