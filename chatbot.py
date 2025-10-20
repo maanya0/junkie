@@ -207,7 +207,6 @@ def create_model_and_agent(user_id: str):
         read_chat_history=True,
         add_history_to_context=True,
         add_datetime_to_context=True,
-        timezone_identifier="Asia/Kolkata",
         search_session_history=True,
         # set max completion token length
         retries=1,
@@ -286,16 +285,17 @@ def setup_chat(bot):
             return
 
         if message.content.startswith(f"{bot.prefix}"):
-            raw_prompt = message.content[len(f"{bot.prefix}"):].strip()
+            # Step 1: replace mentions with readable form
+            processed_content = resolve_mentions(message)
+            
+            # Extract the prompt after the prefix
+            raw_prompt = processed_content[len(f"{bot.prefix}"):].strip()
             if not raw_prompt:
                 return
 
-            # Step 1: replace mentions with readable form
-            processed_prompt = resolve_mentions(message)
-
             # Step 2: prefix user identity for model clarity
             user_label = f"{message.author.display_name}({message.author.id})"
-            formatted_prompt = f"{user_label}: {processed_prompt}"
+            formatted_prompt = f"{user_label}: {raw_prompt}"
 
             # Step 3: run the agent (shared session per channel)
             async with message.channel.typing():
