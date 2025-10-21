@@ -225,7 +225,7 @@ def create_model_and_agent(user_id: str):
         ],
         # Add the previous session history to the context
         instructions=SYSTEM_PROMPT,
-        num_history_runs=50,
+        num_history_runs=20,
         read_chat_history=True,
         add_history_to_context=True,
         add_datetime_to_context=True,
