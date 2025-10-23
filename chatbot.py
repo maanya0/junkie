@@ -42,6 +42,28 @@ db = RedisDb(db_url=REDIS_URL, memory_table="junkie_memories") if USE_REDIS else
 
 # ------------ observability -----------
 # run if env has TRACING=true
+from opentelemetry import trace as trace_api
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+# Set the endpoint and headers for LangSmith
+endpoint = "https://api.smith.langchain.com/otel/v1/traces"
+headers = {
+    "x-api-key": os.getenv("LANGSMITH_API_KEY"),
+    "Langsmith-Project": os.getenv("LANGSMITH_PROJECT"),
+}
+
+# Configure the tracer provider
+tracer_provider = TracerProvider()
+tracer_provider.add_span_processor(
+    SimpleSpanProcessor(OTLPSpanExporter(endpoint=endpoint, headers=headers))
+)
+trace_api.set_tracer_provider(tracer_provider=tracer_provider)
+
+# Start instrumenting agno
+AgnoInstrumentor().instrument()
+
 if os.getenv("TRACING") == "true":
     # Import phoenix lazily to avoid importing heavy/optional deps when tracing is off
     from phoenix.otel import register
