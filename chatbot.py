@@ -42,6 +42,7 @@ db = RedisDb(db_url=REDIS_URL, memory_table="junkie_memories") if USE_REDIS else
 
 # ------------ observability -----------
 # run if env has TRACING=true
+from openinference.instrumentation.agno import AgnoInstrumentor
 from opentelemetry import trace as trace_api
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace import TracerProvider
