@@ -1,5 +1,5 @@
 agno
-openai
+openai>=1.77.0
 arize-phoenix
 openinference-instrumentation-agno
 opentelemetry-sdk
