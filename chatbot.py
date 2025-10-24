@@ -22,7 +22,8 @@ from agno.tools.googlesearch import GoogleSearchTools
 from agno.tools.mcp import MultiMCPTools
 from agno.tools.wikipedia import WikipediaTools
 from atla_insights import configure, instrument, instrument_agno
-configure(token=getenv("ATLA_API_KEY"))
+configure(token=os.environ["ATLA_INSIGHTS_TOKEN"])
+
 # ---------- env ----------
 from dotenv import load_dotenv
 
