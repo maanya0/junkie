@@ -13,7 +13,7 @@ python-dotenv>=1.0.0
 
 
 # Async HTTP support (may be needed for API calls)
-aiohttp>=3.8.0
+aiohttp
 
 serpapi 
 redis
@@ -23,5 +23,5 @@ pycountry
 wikipedia
 exa-py
 mcp
-pydantic<2.10
-uvicorn<0.30
+pydantic
+uvicorn
