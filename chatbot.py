@@ -21,7 +21,8 @@ from agno.tools.exa import ExaTools
 from agno.tools.googlesearch import GoogleSearchTools
 from agno.tools.mcp import MultiMCPTools
 from agno.tools.wikipedia import WikipediaTools
-
+from atla_insights import configure, instrument, instrument_agno
+configure(token=getenv("ATLA_API_KEY"))
 # ---------- env ----------
 from dotenv import load_dotenv
 
@@ -285,9 +286,10 @@ def get_or_create_agent(user_id: str):
 
 async def async_ask_junkie(user_text: str, user_id: str, session_id: str) -> str:
     agent = get_or_create_agent(user_id)
-    result = await agent.arun(
-        input=user_text, user_id=user_id, session_id=session_id
-    )
+    with instrument_agno("openai"):
+        result = await agent.arun(
+            input=user_text, user_id=user_id, session_id=session_id
+        )
     return result.content
 
 
