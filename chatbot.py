@@ -198,7 +198,7 @@ def create_model_and_agent(user_id: str):
     else:
         model = OpenAILike(
             id=model_name,
-            base_url=provider,
+            base_url="https://api.supermemory.ai/v3/" + provider,
             max_tokens=4096,
             api_key=customprovider_api_key,
         )
