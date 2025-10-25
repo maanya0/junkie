@@ -201,6 +201,12 @@ def create_model_and_agent(user_id: str):
             base_url="https://api.supermemory.ai/v3/" + provider,
             max_tokens=4096,
             api_key=customprovider_api_key,
+            client_params={
+                "default_headers": {
+                    "x-supermemory-api-key": SUPERMEMORY_KEY,
+                    "x-sm-user-id": user_id
+                }
+            }
         )
 
     # Create memory manager for this user
