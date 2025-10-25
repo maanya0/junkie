@@ -198,7 +198,7 @@ def create_model_and_agent(user_id: str):
     else:
         model = OpenAILike(
             id=model_name,
-            base_url="https://api.supermemory.ai/v3/" + provider,
+            base_url=provider,
             max_tokens=4096,
             api_key=customprovider_api_key,
             client_params={
@@ -234,7 +234,7 @@ def create_model_and_agent(user_id: str):
         ],
         # Add the previous session history to the context
         instructions=SYSTEM_PROMPT,
-        num_history_runs=20,
+        num_history_runs=5,
         read_chat_history=True,
         add_history_to_context=True,
         add_datetime_to_context=True,
