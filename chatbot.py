@@ -295,12 +295,13 @@ def resolve_mentions(message):
 
 def restore_mentions(response, guild):
     """
-    Convert '@Name(12345)' or 'Name(12345)' back to real Discord mentions '<@12345>'.
-    Handles variations like '@Name(ID)', '@Name (ID)', 'Name(ID)', etc.
+    Convert '@Name(12345)' back to real Discord mentions '<@12345>'.
+    Only converts when @ symbol is present.
+    Handles variations like '@Name(ID)', '@Name (ID)', etc.
     """
-    # Pattern: Matches both @Name(ID) and Name(ID) formats
-    # Captures the name (optional @) and the ID
-    pattern = r"@?([^\(\)<>]+?)\s*\((\d+)\)"
+    # Pattern: Matches ONLY @Name(ID) format (requires @ symbol)
+    # Captures the name and the ID
+    pattern = r"@([^\(\)<>]+?)\s*\((\d+)\)"
     
     def repl(match):
         user_id = match.group(2)
