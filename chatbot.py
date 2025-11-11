@@ -95,7 +95,7 @@ async def fetch_url(url: str) -> str:
 
 mcp_tools = MultiMCPTools(
     urls=[
-        "https://server.smithery.ai/@kirbah/mcp-youtube/mcp?api_key=c51f0d96-1719-4c10-8f64-16b63cd9a1cc&profile=subjective-cat-qX93Yx",
+        "https://server.smithery.ai/@upstash/context7-mcp/mcp?api_key=c51f0d96-1719-4c10-8f64-16b63cd9a1cc&profile=subjective-cat-qX93Yx",
         #"https://server.smithery.ai/@IzumiSy/mcp-duckdb-memory-server/mcp?api_key=c51f0d96-1719-4c10-8f64-16b63cd9a1cc&profile=subjective-cat-qX93Yx",
     ],
     urls_transports=["streamable-http"],
