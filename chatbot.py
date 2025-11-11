@@ -320,9 +320,9 @@ def setup_chat(bot):
     async def on_message(message):
         if not message.content.startswith(bot.prefix):
             return
-        if message.author.id == bot.bot.user.id:
-            await bot.bot.process_commands(message)
-            return
+        #if message.author.id == bot.bot.user.id:
+            #await bot.bot.process_commands(message)
+            #return
 
         if message.content.startswith(f"{bot.prefix}"):
             # Step 1: replace mentions with readable form
