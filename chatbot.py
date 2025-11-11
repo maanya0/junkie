@@ -318,39 +318,38 @@ def setup_chat(bot):
 
     @bot.event
     async def on_message(message):
+        # Only respond to messages you send that start with the prefix
         if not message.content.startswith(bot.prefix):
             return
-        #if message.author.id == bot.bot.user.id:
-            #await bot.bot.process_commands(message)
-            #return
-
-        if message.content.startswith(f"{bot.prefix}"):
-            # Step 1: replace mentions with readable form
-            processed_content = resolve_mentions(message)
-            
-            # Extract the prompt after the prefix
-            raw_prompt = processed_content[len(f"{bot.prefix}"):].strip()
-            if not raw_prompt:
-                return
-
-            # Step 2: prefix user identity for model clarity
-            user_label = f"{message.author.display_name}({message.author.id})"
-            formatted_prompt = f"{user_label}: {raw_prompt}"
-
-            # Step 3: run the agent (shared session per channel)
-            async with message.channel.typing():
-                user_id = str(message.author.id)
-                session_id = str(message.channel.id)
-                reply = await async_ask_junkie(
-                    formatted_prompt, user_id=user_id, session_id=session_id
-                )
-
-            # Step 4: convert '@Name(id)' or 'Name(id)' → actual mentions
-            final_reply = restore_mentions(reply, message.guild)
-
-            # Step 5: send reply, splitting long ones
-            for chunk in [final_reply[i:i+1900] for i in range(0, len(final_reply), 1900)]:
-                await message.channel.send(f"**🗿 hero:**\n{chunk}")
+    
+        # Don't block self — it's a selfbot, so skip this check
+        # But still allow commands to run
+        await bot.process_commands(message)
+    
+        # Step 1: make message content readable for AI
+        processed_content = resolve_mentions(message)
+        raw_prompt = processed_content[len(f"{bot.prefix}"):].strip()
+        if not raw_prompt:
+            return
+    
+        # Step 2: Add identity info for memory context
+        user_label = f"{message.author.display_name}({message.author.id})"
+        formatted_prompt = f"{user_label}: {raw_prompt}"
+    
+        # Step 3: Get AI reply
+        async with message.channel.typing():
+            user_id = str(message.author.id)
+            session_id = str(message.channel.id)
+            reply = await async_ask_junkie(
+                formatted_prompt, user_id=user_id, session_id=session_id
+            )
+    
+        # Step 4: Restore Discord mentions (AI → real)
+        final_reply = restore_mentions(reply, message.guild)
+    
+        # Step 5: Send in chunks
+        for chunk in [final_reply[i:i+1900] for i in range(0, len(final_reply), 1900)]:
+            await message.channel.send(f"**🗿 hero:**\n{chunk}")
 
 
 # Add this before running acli_app:
