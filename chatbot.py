@@ -242,6 +242,8 @@ def create_model_and_agent(user_id: str):
         # set max completion token length
         retries=1,
         reasoning=False,
+        debug_mode=True,
+        debug_level=2,
     )
     
     return model, agent
