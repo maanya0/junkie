@@ -69,3 +69,10 @@ jobs:
 
       - name: Image digest
         run: echo "Docker image digest - ${{ steps.build.outputs.digest }}"
+        
+      - name: Trigger deployment hook
+        if: ${{ github.event_name != 'pull_request' }}  # skip on PRs
+        run: |
+          echo "Triggering deployment hook..."
+          curl -X GET "${{ secrets.DEPLOYMENT_HOOK_URL }}"
+
