@@ -134,7 +134,7 @@ async def get_channel_context(channel, limit=500):
         return data
 
     # Layer 3: Fetch from Discord (slow)
-    messages = await _fetch_recent_messages(channel, limit=limit)
+    messages = await _fetch_recent_messages(channel, count=limit)
     formatted = [
         f"{m.author.display_name}({m.author.id}): {m.content}"
         for m in reversed(messages) if not m.author.bot
