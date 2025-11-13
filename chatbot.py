@@ -144,6 +144,17 @@ async def get_channel_context(channel, limit=500):
     context_cache[channel.id] = {"data": formatted, "timestamp": now}
     await redis_client.set(redis_key, json.dumps(formatted), ex=CACHE_TTL)
     return formatted
+    
+async def build_prompt(message, raw_prompt):
+    user_label = f"{message.author.display_name}({message.author.id})"
+    recent_context = await get_channel_context(message.channel)
+    context_snippet = "\n".join(recent_context)
+
+    prompt = (
+        f"Recent Discord chat:\n{context_snippet}\n\n"
+        f"User {user_label} says: {raw_prompt}"
+    )
+    return prompt
 
 
 SYSTEM_PROMPT = """
