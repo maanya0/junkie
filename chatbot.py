@@ -322,7 +322,8 @@ def setup_chat(bot):
     async def on_message(message):
         if not message.content.startswith(bot.prefix):
             return
-        if message.author.id == bot.bot.user.id:
+       # if message.author.id == bot.bot.user.id:
+        if message.content.startswith(f"{bot.prefix}tldr"):
             await bot.bot.process_commands(message)
             return
 
