@@ -28,6 +28,7 @@ configure(token=os.environ["ATLA_INSIGHTS_TOKEN"])
 from dotenv import load_dotenv
 
 from tldr import _fetch_recent_messages
+from context_cache import build_context_prompt, update_message_in_cache, delete_message_from_cache
 
 import json
 import asyncio
@@ -393,7 +394,7 @@ def setup_chat(bot):
 
             # Step 2: prefix user identity for model clarity
             user_label = f"{message.author.display_name}({message.author.id})"
-            prompt = await build_prompt(message, raw_prompt)
+            prompt = await build_context_prompt(message, raw_prompt, limit=500)
             formatted_prompt = prompt
             #formatted_prompt = f"{user_label}: {raw_prompt}"
 
