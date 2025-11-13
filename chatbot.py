@@ -6,6 +6,7 @@
 import os
 import re
 import sys
+import logging
 
 import aiohttp
 from agno.agent import Agent
@@ -27,23 +28,21 @@ configure(token=os.environ["ATLA_INSIGHTS_TOKEN"])
 # ---------- env ----------
 from dotenv import load_dotenv
 
-from tldr import _fetch_recent_messages
-from context_cache import build_context_prompt, update_message_in_cache, delete_message_from_cache
+from context_cache import (
+    build_context_prompt,
+    update_message_in_cache,
+    delete_message_from_cache,
+    append_message_to_cache,
+)
 
 import json
 import asyncio
 import time
-import redis.asyncio as redis
 
-
-# In-memory cache
-context_cache = {}
-CACHE_TTL = 120  # seconds
 load_dotenv()
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 USE_REDIS = os.getenv("USE_REDIS", "false").lower() == "true"
-redis_client = redis.from_url(REDIS_URL)
 # --------- model and provider -----------
 
 provider = os.getenv("CUSTOM_PROVIDER", "groq")  # default provider
@@ -84,24 +83,57 @@ if os.getenv("TRACING") == "true":
 )
 async def fetch_url(url: str) -> str:
     """
-    Use this function to get content from a URL.
+    Use this function to get content from a URL. This tool fetches and extracts text content
+    from web pages, removing HTML tags and formatting for readability.
 
     Args:
-        url (str): URL to fetch.
+        url (str): URL to fetch. Must be a valid HTTP/HTTPS URL.
 
     Returns:
-        str: Content of the URL.
+        str: Cleaned text content of the URL (up to 3000 characters), or an error message if fetch fails.
     """
-
+    if not url or not url.strip():
+        return "Error: URL is required"
+    
+    # Basic URL validation
+    if not url.startswith(("http://", "https://")):
+        return f"Error: Invalid URL format. URL must start with http:// or https://"
+    
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s:
-            async with s.get(url, headers={"User-Agent": "selfbot-agent/1.0"}) as r:
-                text = await r.text()
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=10),
+            headers={"User-Agent": "Mozilla/5.0 (compatible; JunkieBot/1.0)"}
+        ) as session:
+            async with session.get(url, allow_redirects=True) as response:
+                if response.status != 200:
+                    return f"Error: HTTP {response.status} - Failed to fetch URL"
+                
+                # Try to get text content
+                try:
+                    text = await response.text()
+                except Exception as e:
+                    return f"Error: Could not decode content - {str(e)}"
+                
+                # Clean HTML tags
                 text = re.sub(r"<[^>]+>", "", text)
+                # Normalize whitespace
                 text = re.sub(r"\s+", " ", text)
-                return text[:3_000]
+                text = text.strip()
+                
+                if not text:
+                    return "Error: No text content found on this page"
+                
+                # Return first 3000 chars with indication if truncated
+                if len(text) > 3000:
+                    return text[:3000] + "\n\n[Content truncated - showing first 3000 characters]"
+                return text
+                
+    except aiohttp.ClientError as e:
+        return f"Error: Network error - {str(e)}"
+    except asyncio.TimeoutError:
+        return "Error: Request timed out after 10 seconds"
     except Exception as e:
-        return f"Fetch error: {e}"
+        return f"Error: Unexpected error - {str(e)}"
 
 
 # tools
@@ -114,48 +146,6 @@ mcp_tools = MultiMCPTools(
     urls_transports=["streamable-http"],
 )
 
-async def get_channel_context(channel, limit=500):
-    """
-    Fetch last `limit` messages for a channel, using in-memory and Redis caching.
-    Returns a list of formatted strings: ["User(ID): content", ...]
-    """
-    now = time.time()
-    cache_entry = context_cache.get(channel.id)
-
-    # Layer 1: In-memory cache hit
-    if cache_entry and now - cache_entry["timestamp"] < CACHE_TTL:
-        return cache_entry["data"]
-
-    # Layer 2: Redis cache hit
-    redis_key = f"ctx:{channel.id}"
-    cached_json = await redis_client.get(redis_key)
-    if cached_json:
-        data = json.loads(cached_json)
-        context_cache[channel.id] = {"data": data, "timestamp": now}
-        return data
-
-    # Layer 3: Fetch from Discord (slow)
-    messages = await _fetch_recent_messages(channel, count=limit)
-    formatted = [
-        f"{m.author.display_name}({m.author.id}): {m.content}"
-        for m in reversed(messages) if not m.author.bot
-    ]
-
-    # Cache in both layers
-    context_cache[channel.id] = {"data": formatted, "timestamp": now}
-    await redis_client.set(redis_key, json.dumps(formatted), ex=CACHE_TTL)
-    return formatted
-    
-async def build_prompt(message, raw_prompt):
-    user_label = f"{message.author.display_name}({message.author.id})"
-    recent_context = await get_channel_context(message.channel)
-    context_snippet = "\n".join(recent_context)
-
-    prompt = (
-        f"Recent Discord chat:\n{context_snippet}\n\n"
-        f"User {user_label} says: {raw_prompt}"
-    )
-    return prompt
 
 
 SYSTEM_PROMPT = """
@@ -168,6 +158,29 @@ Provide clear, direct assistance to users in Discord conversations, adapting com
 ## Context
 Operating within Discord's communication constraints, the assistant must deliver information efficiently while maintaining accuracy and helpfulness across various types of queries.
 
+## Accuracy Requirements (CRITICAL)
+1. **Fact Verification**: Before stating any fact, statistic, or claim:
+   - Use web search tools to verify current information
+   - Cross-reference multiple sources when possible
+   - Distinguish between verified facts and opinions
+   - If information cannot be verified, explicitly state uncertainty
+
+2. **Source Attribution**: When using information from tools:
+   - Cite sources when providing factual information
+   - Acknowledge when information comes from web searches
+   - Distinguish between your training data and real-time information
+
+3. **Uncertainty Handling**:
+   - If you're uncertain about an answer, say so explicitly
+   - Use phrases like "Based on my search..." or "According to..."
+   - Never fabricate or guess information to appear knowledgeable
+   - When uncertain, offer to search for more information
+
+4. **Error Prevention**:
+   - Double-check calculations using calculator tools
+   - Verify dates, numbers, and technical details
+   - If a tool fails, acknowledge it rather than guessing
+
 ## Instructions
 1. The assistant should default to short, plain-language responses of 1-2 paragraphs or bullet points.
 
@@ -175,17 +188,21 @@ Operating within Discord's communication constraints, the assistant must deliver
    - Expand the response with detailed information
    - Use markdown formatting
    - Include headings, tables, or code blocks as appropriate
-   - Provide comprehensive explanation
+   - Provide comprehensive explanation with sources
 
 3. Communication guidelines:
    - Never use LaTeX formatting
    - End brief responses with "Ask `--long` for details"
    - Remain friendly, accurate, and unbiased
    - Automatically utilize available tools when needed
+   - Prioritize accuracy over speed
 
 4. Web search and information handling:
-   - Always crosscheck information using web tools
+   - **ALWAYS** use web search tools for current events, recent data, or time-sensitive information
+   - Cross-check information from multiple sources when accuracy is critical
    - Summarize web search results in plain English
+   - Include source credibility indicators when relevant
+   - For historical or factual claims, verify with search tools
    - Directly provide real-time data without disclaimers about inability to access current information
 
 5. Image generation protocol:
@@ -214,14 +231,30 @@ Operating within Discord's communication constraints, the assistant must deliver
 - Keep responses conversational and natural for Discord's chat environment
 
 ## Quality Standards
-- Maintain accuracy and objectivity in all responses
+- **Accuracy is paramount**: Verify facts before stating them
+- Maintain objectivity and cite sources for factual claims
 - Leverage available tools proactively without explicit permission
 - Adapt technical depth to user's apparent proficiency
 - Be helpful, efficient, and contextually aware
 - When uncertain, search for current information rather than speculating
+- Admit when you don't know something rather than guessing
 
 ## Tool Usage
 - Deploy tools seamlessly without announcing their use unless relevant
+- **Always use tools for**: Current events, recent data, calculations, fact verification
+- When tools are used, incorporate their results accurately
+- If a tool fails, acknowledge the failure and suggest alternatives
+- For mathematical questions, use calculator tools to ensure accuracy
+- For factual questions, use search tools to verify information
+
+## Response Quality Checklist
+Before responding, ensure:
+- ✅ Facts are verified (use tools if needed)
+- ✅ Sources are cited for factual claims
+- ✅ Uncertainty is acknowledged when present
+- ✅ Calculations are verified with tools
+- ✅ Information is current and relevant
+- ✅ No fabricated or guessed information
 """
 
 
@@ -237,11 +270,18 @@ def create_model_and_agent(user_id: str):
     Returns:
         tuple: (model, agent) instances configured for the user
     """
+    # Model configuration for accuracy
+    # Lower temperature = more deterministic and accurate responses
+    temperature = float(os.getenv("MODEL_TEMPERATURE", "0.3"))  # Default 0.3 for accuracy
+    top_p = float(os.getenv("MODEL_TOP_P", "0.9"))  # Nucleus sampling for better quality
+    
     # Set up the model using the provider and model name
     if provider == "groq":
         model = OpenAILike(
             id=model_name, 
             max_tokens=4096,
+            temperature=temperature,
+            top_p=top_p,
             base_url="https://api.supermemory.ai/v3/https://api.groq.com/openai/v1",
             api_key=os.getenv("GROQ_API_KEY", ""),
             client_params={
@@ -256,6 +296,8 @@ def create_model_and_agent(user_id: str):
             id=model_name,
             base_url=provider,
             max_tokens=4096,
+            temperature=temperature,
+            top_p=top_p,
             api_key=customprovider_api_key,
             client_params={
                 "default_headers": {
@@ -289,17 +331,18 @@ def create_model_and_agent(user_id: str):
             mcp_tools,
         ],
         # Add the previous session history to the context
+        # Note: Reduced history since Discord context is already provided via prompt
         instructions=SYSTEM_PROMPT,
-        num_history_runs=5,
+        num_history_runs=int(os.getenv("AGENT_HISTORY_RUNS", "1")),  # Reduced from 5 since context is in prompt
         read_chat_history=True,
         add_history_to_context=True,
         add_datetime_to_context=True,
-        search_session_history=True,
+        search_session_history=False,  # Disabled since we provide full context in prompt
         # set max completion token length
-        retries=1,
+        retries=int(os.getenv("AGENT_RETRIES", "2")),  # Increased for better reliability
         reasoning=False,
-        debug_mode=True,
-        debug_level=2,
+        debug_mode=os.getenv("DEBUG_MODE", "false").lower() == "true",
+        debug_level=int(os.getenv("DEBUG_LEVEL", "1")),
     )
     
     return model, agent
@@ -307,10 +350,13 @@ def create_model_and_agent(user_id: str):
 
 # Cache for user agents to avoid recreating them on every message
 _user_agents = {}
+_max_agents = int(os.getenv("MAX_AGENTS", "100"))  # Prevent unbounded growth
+
 
 def get_or_create_agent(user_id: str):
     """
     Get existing agent for user or create a new one.
+    Uses LRU-style eviction if cache gets too large.
     
     Args:
         user_id (str): The Discord user ID
@@ -319,6 +365,12 @@ def get_or_create_agent(user_id: str):
         Agent: Agent instance for the user
     """
     if user_id not in _user_agents:
+        # Evict oldest entries if cache is full (simple FIFO)
+        if len(_user_agents) >= _max_agents:
+            # Remove the first (oldest) entry
+            oldest_key = next(iter(_user_agents))
+            del _user_agents[oldest_key]
+        
         _, agent = create_model_and_agent(user_id)
         _user_agents[user_id] = agent
     return _user_agents[user_id]
@@ -328,12 +380,29 @@ def get_or_create_agent(user_id: str):
 
 
 async def async_ask_junkie(user_text: str, user_id: str, session_id: str) -> str:
+    """
+    Run the agent with improved error handling and response validation.
+    """
     agent = get_or_create_agent(user_id)
-    with instrument_agno("openai"):
-        result = await agent.arun(
-            input=user_text, user_id=user_id, session_id=session_id
-        )
-    return result.content
+    try:
+        with instrument_agno("openai"):
+            result = await agent.arun(
+                input=user_text, user_id=user_id, session_id=session_id
+            )
+        
+        # Basic response validation
+        content = result.content if result and hasattr(result, 'content') else ""
+        
+        # Ensure we have a valid response
+        if not content or not content.strip():
+            return "I apologize, but I couldn't generate a valid response. Please try rephrasing your question."
+        
+        return content
+    except Exception as e:
+        # Log the error for debugging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Agent error for user {user_id}: {e}", exc_info=True)
+        raise  # Re-raise to be handled by caller
 
 
 # ---------- discord ----------
@@ -376,9 +445,13 @@ def setup_chat(bot):
 
     @bot.event
     async def on_message(message):
+        # Update cache with new message (non-bot messages only)
+        if not message.author.bot:
+            await append_message_to_cache(message)
+        
         if not message.content.startswith(bot.prefix):
             return
-       # if message.author.id == bot.bot.user.id:
+        
         if message.content.startswith(f"{bot.prefix}tldr"):
             await bot.bot.process_commands(message)
             return
@@ -392,26 +465,42 @@ def setup_chat(bot):
             if not raw_prompt:
                 return
 
-            # Step 2: prefix user identity for model clarity
-            user_label = f"{message.author.display_name}({message.author.id})"
+            # Step 2: build context-aware prompt
             prompt = await build_context_prompt(message, raw_prompt, limit=500)
-            formatted_prompt = prompt
-            #formatted_prompt = f"{user_label}: {raw_prompt}"
 
             # Step 3: run the agent (shared session per channel)
             async with message.channel.typing():
                 user_id = str(message.author.id)
                 session_id = str(message.channel.id)
-                reply = await async_ask_junkie(
-                    formatted_prompt, user_id=user_id, session_id=session_id
-                )
+                try:
+                    reply = await async_ask_junkie(
+                        prompt, user_id=user_id, session_id=session_id
+                    )
+                except Exception as e:
+                    await message.channel.send(
+                        f"**Error:** Failed to process request: {str(e)[:500]}"
+                    )
+                    return
 
-            # Step 4: convert '@Name(id)' or 'Name(id)' → actual mentions
+            # Step 4: convert '@Name(id)' → actual mentions
             final_reply = restore_mentions(reply, message.guild)
 
-            # Step 5: send reply, splitting long ones
-            for chunk in [final_reply[i:i+1900] for i in range(0, len(final_reply), 1900)]:
+            # Step 5: send reply, splitting long ones (Discord limit is 2000 chars)
+            chunk_size = 1900
+            for chunk in [final_reply[i:i+chunk_size] for i in range(0, len(final_reply), chunk_size)]:
                 await message.channel.send(f"**🗿 hero:**\n{chunk}")
+
+    @bot.event
+    async def on_message_edit(before, after):
+        """Handle message edits to update cache."""
+        if not after.author.bot:
+            await update_message_in_cache(before, after)
+
+    @bot.event
+    async def on_message_delete(message):
+        """Handle message deletions to update cache."""
+        if not message.author.bot:
+            await delete_message_from_cache(message)
 
 
 # Add this before running acli_app:
