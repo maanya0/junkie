@@ -27,7 +27,7 @@ configure(token=os.environ["ATLA_INSIGHTS_TOKEN"])
 # ---------- env ----------
 from dotenv import load_dotenv
 
-from tldr import fetch_recent_messages
+from tldr import _fetch_recent_messages
 
 import json
 import asyncio
@@ -134,7 +134,7 @@ async def get_channel_context(channel, limit=500):
         return data
 
     # Layer 3: Fetch from Discord (slow)
-    messages = await fetch_recent_messages(channel, limit=limit)
+    messages = await _fetch_recent_messages(channel, limit=limit)
     formatted = [
         f"{m.author.display_name}({m.author.id}): {m.content}"
         for m in reversed(messages) if not m.author.bot
