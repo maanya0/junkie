@@ -27,10 +27,22 @@ configure(token=os.environ["ATLA_INSIGHTS_TOKEN"])
 # ---------- env ----------
 from dotenv import load_dotenv
 
+from tldr import fetch_recent_messages
+
+import json
+import asyncio
+import time
+import redis.asyncio as redis
+
+
+# In-memory cache
+context_cache = {}
+CACHE_TTL = 120  # seconds
 load_dotenv()
+
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 USE_REDIS = os.getenv("USE_REDIS", "false").lower() == "true"
-
+redis_client = redis.from_url(REDIS_URL)
 # --------- model and provider -----------
 
 provider = os.getenv("CUSTOM_PROVIDER", "groq")  # default provider
@@ -100,6 +112,38 @@ mcp_tools = MultiMCPTools(
     ],
     urls_transports=["streamable-http"],
 )
+
+async def get_channel_context(channel, limit=500):
+    """
+    Fetch last `limit` messages for a channel, using in-memory and Redis caching.
+    Returns a list of formatted strings: ["User(ID): content", ...]
+    """
+    now = time.time()
+    cache_entry = context_cache.get(channel.id)
+
+    # Layer 1: In-memory cache hit
+    if cache_entry and now - cache_entry["timestamp"] < CACHE_TTL:
+        return cache_entry["data"]
+
+    # Layer 2: Redis cache hit
+    redis_key = f"ctx:{channel.id}"
+    cached_json = await redis_client.get(redis_key)
+    if cached_json:
+        data = json.loads(cached_json)
+        context_cache[channel.id] = {"data": data, "timestamp": now}
+        return data
+
+    # Layer 3: Fetch from Discord (slow)
+    messages = await fetch_recent_messages(channel, limit=limit)
+    formatted = [
+        f"{m.author.display_name}({m.author.id}): {m.content}"
+        for m in reversed(messages) if not m.author.bot
+    ]
+
+    # Cache in both layers
+    context_cache[channel.id] = {"data": formatted, "timestamp": now}
+    await redis_client.set(redis_key, json.dumps(formatted), ex=CACHE_TTL)
+    return formatted
 
 
 SYSTEM_PROMPT = """
@@ -338,7 +382,9 @@ def setup_chat(bot):
 
             # Step 2: prefix user identity for model clarity
             user_label = f"{message.author.display_name}({message.author.id})"
-            formatted_prompt = f"{user_label}: {raw_prompt}"
+            prompt = await build_prompt(message, raw_prompt)
+            formatted_prompt = prompt
+            #formatted_prompt = f"{user_label}: {raw_prompt}"
 
             # Step 3: run the agent (shared session per channel)
             async with message.channel.typing():
