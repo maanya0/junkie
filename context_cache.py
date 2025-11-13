@@ -7,8 +7,9 @@ import os
 import json
 import time
 import logging
-import redis.asyncio as redis
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
+import redis.asyncio as redis
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,6 +40,61 @@ def get_redis_client():
 # In-memory cache (fallback)
 _memory_cache = {}
 CACHE_TTL = int(os.getenv("CACHE_TTL", "120"))  # seconds
+
+# Timezone configuration (Discord uses UTC, but we can display in a specific timezone)
+# Default to Asia/Kolkata (IST - Indian Standard Time), but can be configured via DISCORD_TIMEZONE env var
+try:
+    import pytz
+    _timezone_str = os.getenv("DISCORD_TIMEZONE", "Asia/Kolkata")
+    _timezone = pytz.timezone(_timezone_str)
+    _has_pytz = True
+except ImportError:
+    # Fallback: IST is UTC+5:30, but without pytz we can't do proper timezone conversion
+    _timezone_str = "UTC"
+    _timezone = timezone.utc
+    _has_pytz = False
+    logger.warning("pytz not installed, using UTC. Install pytz for timezone support (required for IST).")
+
+
+def format_message_timestamp(message_created_at, current_time: datetime) -> str:
+    """
+    Format message timestamp with relative time indication.
+    Returns formatted string like "[2h ago]" or "[Dec 15, 14:30]" for older messages.
+    """
+    if not message_created_at:
+        return ""
+    
+    # Ensure both are timezone-aware
+    if message_created_at.tzinfo is None:
+        message_created_at = message_created_at.replace(tzinfo=timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    
+    # Convert to configured timezone if pytz is available
+    if _has_pytz and _timezone != timezone.utc:
+        try:
+            message_created_at = message_created_at.astimezone(_timezone)
+            current_time = current_time.astimezone(_timezone)
+        except Exception:
+            pass  # Fallback to UTC
+    
+    time_diff = current_time - message_created_at
+    
+    # Relative time formatting
+    if time_diff < timedelta(minutes=1):
+        return "[just now]"
+    elif time_diff < timedelta(hours=1):
+        minutes = int(time_diff.total_seconds() / 60)
+        return f"[{minutes}m ago]"
+    elif time_diff < timedelta(days=1):
+        hours = int(time_diff.total_seconds() / 3600)
+        return f"[{hours}h ago]"
+    elif time_diff < timedelta(days=7):
+        days = time_diff.days
+        return f"[{days}d ago]"
+    else:
+        # For older messages, show date and time
+        return f"[{message_created_at.strftime('%b %d, %H:%M')}]"
 
 
 # ──────────────────────────────────────────────
@@ -81,15 +137,18 @@ async def get_recent_context(channel, limit: int = 500) -> List[str]:
     # 3. Fetch from Discord API
     try:
         messages = []
+        current_time = datetime.now(timezone.utc)
         async for m in channel.history(limit=limit):
             if not m.author.bot and m.content.strip():
                 messages.append(m)
         messages.reverse()  # chronological order (oldest → newest)
 
-        formatted = [
-            f"{m.author.display_name}({m.author.id}): {m.clean_content}"
-            for m in messages
-        ]
+        formatted = []
+        for m in messages:
+            timestamp_str = format_message_timestamp(m.created_at, current_time)
+            formatted.append(
+                f"{timestamp_str} {m.author.display_name}({m.author.id}): {m.clean_content}"
+            )
 
         # Cache results
         _memory_cache[channel_id] = {"data": formatted, "timestamp": now}
@@ -119,15 +178,48 @@ async def get_recent_context(channel, limit: int = 500) -> List[str]:
 async def build_context_prompt(message, raw_prompt: str, limit: int = 500):
     """
     Build a model-ready text prompt with up to `limit` recent messages.
+    Includes current date/time for temporal awareness.
     """
     user_label = f"{message.author.display_name}({message.author.id})"
     context_lines = await get_recent_context(message.channel, limit=limit)
+    
+    # Get current date/time with timezone
+    now = datetime.now(timezone.utc)
+    if _has_pytz and _timezone != timezone.utc:
+        try:
+            now = now.astimezone(_timezone)
+        except Exception:
+            pass
+    
+    # Format current time with proper timezone display
+    if _has_pytz:
+        # Get timezone abbreviation (IST, etc.)
+        try:
+            tz_abbr = now.strftime("%Z") or _timezone_str
+        except Exception:
+            tz_abbr = "IST" if "Kolkata" in _timezone_str else _timezone_str
+        current_time_str = now.strftime("%Y-%m-%d %H:%M:%S %Z")
+        timezone_name = f"{tz_abbr} (Asia/Kolkata, UTC+5:30)" if "Kolkata" in _timezone_str else _timezone_str
+    else:
+        current_time_str = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+        timezone_name = "UTC (pytz not installed - install pytz for IST support)"
+    
+    # Format message timestamp
+    message_timestamp = format_message_timestamp(message.created_at, now)
+    if not message_timestamp:
+        message_timestamp = "[now]"
 
     prompt = (
-        "Here is the recent Discord conversation:\n"
+        f"Current Date/Time: {current_time_str} ({timezone_name})\n"
+        f"Timezone: Indian Standard Time (IST) - Asia/Kolkata (UTC+5:30)\n"
+        f"All message timestamps are relative to this current time and displayed in IST.\n\n"
+        f"Here is the recent Discord conversation (messages are in chronological order, oldest to newest):\n"
         + "\n".join(context_lines)
-        + f"\n\nNow, respond to the following message by {user_label}:\n"
-        + raw_prompt
+        + f"\n\n{message_timestamp} {user_label} says: {raw_prompt}\n\n"
+        f"IMPORTANT: The message above is the CURRENT message you need to respond to. "
+        f"All previous messages in the conversation are from the PAST. "
+        f"Pay attention to timestamps to understand when things happened relative to now. "
+        f"All times are in IST (Indian Standard Time, UTC+5:30)."
     )
     return prompt
 
@@ -149,7 +241,10 @@ async def append_message_to_cache(message):
     if not mem_entry:
         return  # Cache doesn't exist, will be built on next fetch
     
-    new_line = f"{message.author.display_name}({message.author.id}): {message.clean_content}"
+    # Format with timestamp
+    current_time = datetime.now(timezone.utc)
+    timestamp_str = format_message_timestamp(message.created_at, current_time)
+    new_line = f"{timestamp_str} {message.author.display_name}({message.author.id}): {message.clean_content}"
     updated_data = mem_entry["data"] + [new_line]
     
     # Keep only last N messages to prevent unbounded growth
@@ -179,11 +274,17 @@ async def update_message_in_cache(before, after):
 
     updated = []
     replaced = False
-    old_line = f"{before.author.display_name}({before.author.id}): {before.clean_content}"
-    new_line = f"{after.author.display_name}({after.author.id}): {after.clean_content}"
+    current_time = datetime.now(timezone.utc)
+    timestamp_str = format_message_timestamp(before.created_at, current_time)
+    
+    # Match with or without timestamp (for backward compatibility)
+    old_line_no_ts = f"{before.author.display_name}({before.author.id}): {before.clean_content}"
+    old_line_with_ts = f"{timestamp_str} {old_line_no_ts}"
+    new_line = f"{timestamp_str} {after.author.display_name}({after.author.id}): {after.clean_content}"
 
     for line in mem_entry["data"]:
-        if line == old_line:
+        # Check both with and without timestamp for backward compatibility
+        if line == old_line_with_ts or line == old_line_no_ts or line.endswith(before.clean_content):
             updated.append(new_line)
             replaced = True
         else:
@@ -209,8 +310,17 @@ async def delete_message_from_cache(message):
     if not mem_entry:
         return
 
-    target_line = f"{message.author.display_name}({message.author.id}): {message.clean_content}"
-    new_data = [line for line in mem_entry["data"] if line != target_line]
+    # Match with or without timestamp
+    target_line_no_ts = f"{message.author.display_name}({message.author.id}): {message.clean_content}"
+    current_time = datetime.now(timezone.utc)
+    timestamp_str = format_message_timestamp(message.created_at, current_time)
+    target_line_with_ts = f"{timestamp_str} {target_line_no_ts}"
+    
+    # Remove matching lines (with or without timestamp)
+    new_data = [
+        line for line in mem_entry["data"] 
+        if line != target_line_no_ts and line != target_line_with_ts and not line.endswith(message.clean_content)
+    ]
 
     _memory_cache[channel_id] = {"data": new_data, "timestamp": time.time()}
     redis_key = f"context:{channel_id}"
