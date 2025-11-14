@@ -367,7 +367,7 @@ def create_model_and_agent(user_id: str):
         search_session_history=False,  # Disabled since we provide full context in prompt
         # set max completion token length
         retries=int(os.getenv("AGENT_RETRIES", "2")),  # Increased for better reliability
-        #reasoning=False,
+        reasoning=True,
         debug_mode=os.getenv("DEBUG_MODE", "false").lower() == "true",
         debug_level=int(os.getenv("DEBUG_LEVEL", "1")),
     )
