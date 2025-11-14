@@ -1,27 +1,40 @@
-# Use Python 3.12 slim for small size
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1.7
 
-# Avoid interactive prompts
-ENV DEBIAN_FRONTEND=noninteractive
+############################
+#    BUILDER STAGE         #
+############################
+FROM python:3.12-slim AS builder
 
-# Set working directory
 WORKDIR /app
 
-# If you have any pip packages from Git, keep git. Otherwise skip it.
+# Install git only in the builder (needed for Git dependencies)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends git && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
-COPY requirements.txt .
+# Install uv
+RUN pip install uv
 
-# Install Python dependencies efficiently
-#RUN pip install --no-cache-dir -r requirements.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.txt
+# Copy dependency files (only these to maximize caching)
+COPY pyproject.toml uv.lock ./
 
-# Copy application code
+# Install dependencies using uv with full caching
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+
+############################
+#    FINAL STAGE           #
+############################
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Copy the environment created by uv from builder
+COPY --from=builder /app/.venv .venv
+
+# Copy source code
 COPY . .
 
-# Start the app
-CMD ["python", "main.py"]
+# Use .venv Python
+CMD [".venv/bin/python", "main.py"]
