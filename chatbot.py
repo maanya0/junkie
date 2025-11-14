@@ -1,9 +1,4 @@
-# chatbot.py  –  public, redis-backed chat for discord.py-self  (auto-web)
-# migration to agno
-
-
-# other imports
-import os
+# chatbot.py
 import re
 import sys
 import logging
