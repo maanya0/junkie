@@ -10,7 +10,7 @@ git+https://github.com/dolfies/discord.py-self.git@97e06c393f6e8f30d00fe0dd9cdf7
 
 # Environment variable management
 python-dotenv>=1.0.0
-
+#
 
 # Async HTTP support (may be needed for API calls)
 aiohttp
