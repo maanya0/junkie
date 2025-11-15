@@ -240,7 +240,7 @@ def setup_playlichess(bot):
             await ctx.message.delete(delay=1.5)
         except Exception:
             # ignore deletion failure
-         #   await ctx.send("creating..." ,delete_after=3)
+            await ctx.send("creating..." ,delete_after=3)
             pass
 
         # If user asked for help explicitly
