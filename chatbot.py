@@ -11,8 +11,6 @@ import logging
 import aiohttp
 from agno.agent import Agent
 from agno.db.redis import RedisDb
-from agno.memory import MemoryManager
-from agno.models.groq import Groq
 from agno.models.openai import OpenAILike
 
 # tool imports
@@ -22,8 +20,6 @@ from agno.tools.exa import ExaTools
 from agno.tools.googlesearch import GoogleSearchTools
 from agno.tools.mcp import MultiMCPTools
 from agno.tools.wikipedia import WikipediaTools
-from atla_insights import configure, instrument, instrument_agno
-configure(token=os.environ["ATLA_INSIGHTS_TOKEN"])
 
 # ---------- env ----------
 from dotenv import load_dotenv
@@ -35,9 +31,7 @@ from context_cache import (
     append_message_to_cache,
 )
 
-import json
 import asyncio
-import time
 
 load_dotenv()
 
@@ -55,23 +49,70 @@ db = RedisDb(db_url=REDIS_URL, memory_table="junkie_memories") if USE_REDIS else
 
 
 # ------------ observability -----------
-# run if env has TRACING=true
+# Phoenix tracing - only enabled if TRACING=true
+_phoenix_tracer = None
 
-if os.getenv("TRACING") == "true":
-    # Import phoenix lazily to avoid importing heavy/optional deps when tracing is off
-    from phoenix.otel import register
+def setup_phoenix_tracing():
+    """Lazy initialization of Phoenix tracing with optimizations."""
+    global _phoenix_tracer
+    
+    if _phoenix_tracer is not None:
+        return _phoenix_tracer  # Already initialized
+    
+    if os.getenv("TRACING", "false").lower() != "true":
+        return None
+    
+    try:
+        # Import phoenix lazily to avoid importing heavy/optional deps when tracing is off
+        from phoenix.otel import register
+        
+        # Get configuration from environment variables with sensible defaults
+        phoenix_api_key = os.getenv("PHOENIX_API_KEY")
+        phoenix_endpoint = os.getenv(
+            "PHOENIX_ENDPOINT",
+            "https://app.phoenix.arize.com/s/maanyapatel145/v1/traces"
+        )
+        phoenix_project = os.getenv("PHOENIX_PROJECT_NAME", "junkie")
+        
+        if not phoenix_api_key:
+            logger = logging.getLogger(__name__)
+            logger.warning("PHOENIX_API_KEY not set, skipping Phoenix tracing")
+            _phoenix_tracer = False  # Mark as attempted but failed
+            return None
+        
+        # Set environment variables for Arize Phoenix (only if not already set)
+        if "PHOENIX_CLIENT_HEADERS" not in os.environ:
+            os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={phoenix_api_key}"
+        if "PHOENIX_COLLECTOR_ENDPOINT" not in os.environ:
+            os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://app.phoenix.arize.com"
+        
+        # Configure the Phoenix tracer with optimizations
+        tracer_provider = register(
+            project_name=phoenix_project,
+            endpoint=phoenix_endpoint,
+            auto_instrument=True,
+            batch=True,  # Batch traces for better performance (reduces overhead)
+        )
+        
+        _phoenix_tracer = tracer_provider
+        logger = logging.getLogger(__name__)
+        logger.info(f"Phoenix tracing enabled (project: {phoenix_project})")
+        
+        return tracer_provider
+    except ImportError:
+        logger = logging.getLogger(__name__)
+        logger.warning("Phoenix tracing requested but 'phoenix' package not installed")
+        _phoenix_tracer = False
+        return None
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to initialize Phoenix tracing: {e}", exc_info=True)
+        _phoenix_tracer = False
+        return None
 
-    # Set environment variables for Arize Phoenix
-    os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={os.getenv('PHOENIX_API_KEY')}"
-    os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://app.phoenix.arize.com"
-    os.environ["OPENAI_API_KEY "] = "placeholder_notneeded"
-    # Configure the Phoenix tracer
-    tracer_provider = register(
-        project_name="junkie",  # Default is 'default'
-        endpoint="https://app.phoenix.arize.com/s/maanyapatel145/v1/traces",
-        auto_instrument=True,
-        batch=True,
-    )
+# Initialize Phoenix tracing if enabled (lazy, but can be called early)
+if os.getenv("TRACING", "false").lower() == "true":
+    setup_phoenix_tracing()
 
 
 # ---------- web tools ----------
@@ -136,15 +177,33 @@ async def fetch_url(url: str) -> str:
         return f"Error: Unexpected error - {str(e)}"
 
 
-# tools
+# MCP tools - lazy initialization to avoid startup overhead
+_mcp_tools = None
+_mcp_connected = False
 
-mcp_tools = MultiMCPTools(
-    urls=[
-        "https://server.smithery.ai/@upstash/context7-mcp/mcp?api_key=c51f0d96-1719-4c10-8f64-16b63cd9a1cc&profile=subjective-cat-qX93Yx",
-        #"https://server.smithery.ai/@IzumiSy/mcp-duckdb-memory-server/mcp?api_key=c51f0d96-1719-4c10-8f64-16b63cd9a1cc&profile=subjective-cat-qX93Yx",
-    ],
-    urls_transports=["streamable-http"],
-)
+def get_mcp_tools():
+    """Lazy initialization of MCP tools - only create when needed."""
+    global _mcp_tools
+    if _mcp_tools is None:
+        mcp_urls = os.getenv("MCP_URLS", "").strip()
+        if mcp_urls:
+            # Support comma-separated URLs from env
+            urls = [url.strip() for url in mcp_urls.split(",") if url.strip()]
+        else:
+            # Default fallback
+            urls = [
+                "https://server.smithery.ai/@upstash/context7-mcp/mcp?api_key=c51f0d96-1719-4c10-8f64-16b63cd9a1cc&profile=subjective-cat-qX93Yx",
+            ]
+        
+        if urls:
+            _mcp_tools = MultiMCPTools(
+                urls=urls,
+                urls_transports=["streamable-http"],
+            )
+        else:
+            # Return empty list if no MCP URLs configured
+            _mcp_tools = []
+    return _mcp_tools
 
 
 
@@ -338,29 +397,25 @@ def create_model_and_agent(user_id: str):
             }
         )
 
-    # Create memory manager for this user
-    memory_manager = MemoryManager(
-        db=db,
-        # model used for memory creation and updates
-        model=Groq(id="openai/gpt-oss-120b"),
-    )
-
     # Create agent for this user
+    tools_list = [
+        fetch_url,
+        GoogleSearchTools(),
+        WikipediaTools(),
+        CalculatorTools(),
+        ExaTools(),
+    ]
+    # Add MCP tools if available
+    mcp = get_mcp_tools()
+    if mcp:
+        tools_list.append(mcp)
+    
     agent = Agent(
         name="Junkie",
         model=model,
         # Add a database to the Agent
         db=db,
-        # memory_manager=memory_manager,
-        # enable_user_memories=True,
-        tools=[
-            fetch_url,
-            GoogleSearchTools(),
-            WikipediaTools(),
-            CalculatorTools(),
-            ExaTools(),
-            mcp_tools,
-        ],
+        tools=tools_list,
         # Add the previous session history to the context
         # Note: Reduced history since Discord context is already provided via prompt
         instructions=SYSTEM_PROMPT,
@@ -417,10 +472,9 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str) -> str
     """
     agent = get_or_create_agent(user_id)
     try:
-        with instrument_agno("openai"):
-            result = await agent.arun(
-                input=user_text, user_id=user_id, session_id=session_id
-            )
+        result = await agent.arun(
+            input=user_text, user_id=user_id, session_id=session_id
+        )
         
         # Basic response validation
         content = result.content if result and hasattr(result, 'content') else ""
@@ -439,9 +493,19 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str) -> str
 
 # ---------- discord ----------
 async def setup_mcp():
-    await mcp_tools.connect()
-    print("MCP tools connected")
-    print(mcp_tools)
+    """Lazy connect to MCP tools only if they exist."""
+    global _mcp_connected
+    mcp = get_mcp_tools()
+    if mcp and not _mcp_connected:
+        try:
+            if isinstance(mcp, MultiMCPTools):
+                await mcp.connect()
+                _mcp_connected = True
+                logger = logging.getLogger(__name__)
+                logger.info("MCP tools connected")
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to connect MCP tools: {e}")
     
 def resolve_mentions(message):
     """
@@ -477,28 +541,28 @@ def setup_chat(bot):
 
     @bot.event
     async def on_message(message):
-        # Update cache with new message (non-bot messages only)
-        if not message.author.bot:
-            await append_message_to_cache(message)
+        # Update cache with new message (both user and bot messages for full context)
+        await append_message_to_cache(message)
         
-        if not message.content.startswith(bot.prefix):
-            return
-        
-        if message.content.startswith(f"{bot.prefix}tldr"):
+        # Check for command prefix (.) - let commands be processed by bot
+        if message.content.startswith(bot.prefix):
             await bot.bot.process_commands(message)
             return
 
-        if message.content.startswith(f"{bot.prefix}"):
+        # Check for chatbot prefix (!) - process as chatbot message
+        chatbot_prefix = "!"
+        if message.content.startswith(chatbot_prefix):
             # Step 1: replace mentions with readable form
             processed_content = resolve_mentions(message)
             
             # Extract the prompt after the prefix
-            raw_prompt = processed_content[len(f"{bot.prefix}"):].strip()
+            raw_prompt = processed_content[len(chatbot_prefix):].strip()
             if not raw_prompt:
                 return
 
             # Step 2: build context-aware prompt
-            prompt = await build_context_prompt(message, raw_prompt, limit=500)
+            # Use default limit (MAX_MESSAGES_IN_CACHE from context_cache)
+            prompt = await build_context_prompt(message, raw_prompt)
 
             # Step 3: run the agent (shared session per channel)
             async with message.channel.typing():
@@ -525,20 +589,17 @@ def setup_chat(bot):
     @bot.event
     async def on_message_edit(before, after):
         """Handle message edits to update cache."""
-        if not after.author.bot:
-            await update_message_in_cache(before, after)
+        await update_message_in_cache(before, after)
 
     @bot.event
     async def on_message_delete(message):
         """Handle message deletions to update cache."""
-        if not message.author.bot:
-            await delete_message_from_cache(message)
+        await delete_message_from_cache(message)
 
 
 # Add this before running acli_app:
 async def main():
-    await mcp_tools.connect()
-    print("MCP tools connected")
+    await setup_mcp()
     try:
         if sys.stdin and sys.stdin.isatty():
             # For CLI, use a default user_id
@@ -547,7 +608,12 @@ async def main():
         else:
             print("Non-interactive environment detected; skipping CLI app.")
     finally:
-        await mcp_tools.close()
+        mcp = get_mcp_tools()
+        if mcp and isinstance(mcp, MultiMCPTools) and _mcp_connected:
+            try:
+                await mcp.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
