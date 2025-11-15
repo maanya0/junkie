@@ -15,7 +15,7 @@ class SelfBot:
 
         self.bot = commands.Bot(
             command_prefix=prefix,
-            self_bot=True,
+            self_bot=False,
         )
 
         self.prefix = prefix
