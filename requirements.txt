@@ -15,7 +15,8 @@ python-dotenv>=1.0.0
 # Async HTTP support (may be needed for API calls)
 aiohttp
 
-serpapi 
+serpapi
+play-lichess
 redis
 groq
 googlesearch-python
