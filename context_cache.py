@@ -308,8 +308,18 @@ async def get_recent_context(channel, limit: int = 500) -> List[str]:
     channel_id = channel.id
     mem_entry = _memory_cache.get(channel_id)
 
+    logger.info(f"[get_recent_context] Requested {limit} messages for channel {channel_id}")
+
     # 1. In-memory cache hit
     if mem_entry and now - mem_entry["timestamp"] < CACHE_TTL:
+        cached_count = len(mem_entry["data"])
+        logger.info(f"[get_recent_context] In-memory cache hit: {cached_count} messages available")
+        # Return up to requested limit
+        if cached_count > limit:
+            result = mem_entry["data"][-limit:]
+            logger.info(f"[get_recent_context] Returning last {len(result)} messages from cache (requested {limit})")
+            return result
+        logger.info(f"[get_recent_context] Returning all {cached_count} messages from cache")
         return mem_entry["data"].copy()  # Return copy to prevent mutation
 
     # 2. Redis cache hit
@@ -319,22 +329,33 @@ async def get_recent_context(channel, limit: int = 500) -> List[str]:
         try:
             data = await _chunked_redis_get(redis_client, redis_key)
             if data:
-                # Cap the cached data to MAX_MESSAGES_IN_CACHE
-                if len(data) > MAX_MESSAGES_IN_CACHE:
-                    data = data[-MAX_MESSAGES_IN_CACHE:]
+                redis_count = len(data)
+                logger.info(f"[get_recent_context] Redis cache hit: {redis_count} messages available")
+                # Return up to requested limit (don't cap at MAX_MESSAGES_IN_CACHE)
+                if redis_count > limit:
+                    data = data[-limit:]
+                    logger.info(f"[get_recent_context] Returning last {len(data)} messages from Redis (requested {limit})")
+                else:
+                    logger.info(f"[get_recent_context] Returning all {redis_count} messages from Redis")
                 _memory_cache[channel_id] = {"data": data, "timestamp": now}
                 return data.copy()
         except Exception as e:
-            logger.debug(f"Redis cache miss or error for {channel_id}: {e}")
+            logger.debug(f"[get_recent_context] Redis cache miss or error for {channel_id}: {e}")
 
     # 3. Fetch from Discord API
+    logger.info(f"[get_recent_context] Fetching {effective_limit} messages from Discord API for channel {channel_id}")
     try:
         messages = []
         current_time = datetime.now(timezone.utc)
+        fetched_count = 0
         async for m in channel.history(limit=effective_limit):
+            fetched_count += 1
             # Include all messages (both user and bot) for full context
             if m.content.strip():
                 messages.append(m)
+        
+        logger.info(f"[get_recent_context] Fetched {fetched_count} messages from Discord, {len(messages)} have content")
+        
         messages.reverse()  # chronological order (oldest → newest)
 
         formatted = []
@@ -344,17 +365,23 @@ async def get_recent_context(channel, limit: int = 500) -> List[str]:
                 f"{timestamp_str} {m.author.display_name}({m.author.id}): {m.clean_content}"
             )
 
+        logger.info(f"[get_recent_context] Formatted {len(formatted)} messages for channel {channel_id}")
+
         # Cache results (in-memory always, Redis with chunking if needed)
         _memory_cache[channel_id] = {"data": formatted, "timestamp": now}
         if redis_client:
             await _chunked_redis_set(redis_client, redis_key, formatted, CACHE_TTL)
+            logger.info(f"[get_recent_context] Cached {len(formatted)} messages in Redis")
 
         return formatted
     except Exception as e:
-        logger.error(f"Failed to fetch messages from channel {channel_id}: {e}")
+        logger.error(f"[get_recent_context] Failed to fetch messages from channel {channel_id}: {e}", exc_info=True)
         # Return cached data if available, even if expired
         if mem_entry:
+            cached_count = len(mem_entry["data"])
+            logger.warning(f"[get_recent_context] Returning expired cache with {cached_count} messages")
             return mem_entry["data"].copy()
+        logger.warning(f"[get_recent_context] No messages available for channel {channel_id}")
         return []
 
 
@@ -374,15 +401,23 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None):
     
     user_label = f"{message.author.display_name}({message.author.id})"
     
+    logger.info(f"[build_context_prompt] Building prompt with limit={limit} for channel {message.channel.id}")
+    
     # Get context with limit+1 to account for the current message that might be in cache
     # This ensures we get exactly 'limit' messages excluding the current one
-    context_lines = await get_recent_context(message.channel, limit=limit + 1)
+    requested_limit = limit + 1
+    logger.info(f"[build_context_prompt] Requesting {requested_limit} messages to account for current message")
+    context_lines = await get_recent_context(message.channel, limit=requested_limit)
+    
+    logger.info(f"[build_context_prompt] Received {len(context_lines)} messages from get_recent_context")
     
     # Exclude the current message from context (it will be added separately below)
     # The current message is likely the last one in the list (most recent)
     current_message_content = message.clean_content
     current_author_id = str(message.author.id)
     current_author_name = message.author.display_name
+    
+    logger.debug(f"[build_context_prompt] Current message: {current_author_name}({current_author_id}): {current_message_content[:50]}...")
     
     # Filter out the current message from context
     # Check the last few messages (most recent) to find and remove the current one
@@ -403,20 +438,27 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None):
         # (to avoid false matches with partial content)
         if is_current and line.rstrip().endswith(current_message_content):
             found_current = True
+            logger.info(f"[build_context_prompt] Found and excluded current message at index {i}")
             continue  # Skip the current message
         
         filtered_context.append(line)
+    
+    if not found_current:
+        logger.warning(f"[build_context_prompt] Current message not found in context (may not be cached yet)")
     
     # If we didn't find the current message in context (cache miss scenario),
     # just take the last 'limit' messages
     if not found_current and len(filtered_context) > limit:
         filtered_context = filtered_context[-limit:]
+        logger.info(f"[build_context_prompt] Taking last {limit} messages (current not found)")
     elif len(filtered_context) > limit:
         # If we found and removed current message, we should have exactly limit or limit+1
         # Take the last 'limit' messages
         filtered_context = filtered_context[-limit:]
+        logger.info(f"[build_context_prompt] Taking last {limit} messages after removing current")
     
     context_lines = filtered_context
+    logger.info(f"[build_context_prompt] Final context has {len(context_lines)} messages (target: {limit})")
     
     # Get current date/time with timezone
     now = datetime.now(timezone.utc)
