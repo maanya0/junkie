@@ -559,7 +559,7 @@ def setup_chat(bot):
             # Request 500 messages (current message will be excluded and added separately)
             logger = logging.getLogger(__name__)
             logger.info(f"[chatbot] Building context for channel {message.channel.id}, user {message.author.id}")
-            prompt = await build_context_prompt(message, raw_prompt, limit=500)
+            prompt = await build_context_prompt(message, raw_prompt, limit=700)
             logger.info(f"[chatbot] Context prompt built, length: {len(prompt)} characters")
 
             # Step 3: run the agent (shared session per channel)
