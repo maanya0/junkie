@@ -1,13 +1,8 @@
-# chatbot.py  –  public, redis-backed chat for discord.py-self  (auto-web)
-# migration to agno
-
-
-# other imports
-import os
+# chatbot.py
 import re
 import sys
 import logging
-
+import os
 import aiohttp
 from agno.agent import Agent
 from agno.db.redis import RedisDb
@@ -420,14 +415,14 @@ def create_model_and_agent(user_id: str):
         # Note: Reduced history since Discord context is already provided via prompt
         instructions=SYSTEM_PROMPT,
         num_history_runs=int(os.getenv("AGENT_HISTORY_RUNS", "1")),  # Reduced from 5 since context is in prompt
-        read_chat_history=True,
-        add_history_to_context=True,
+       # read_chat_history=True,
+      #  add_history_to_context=True,
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",  # IST timezone for datetime context
-        search_session_history=False,  # Disabled since we provide full context in prompt
+        search_session_history=True,  # Disabled since we provide full context in prompt
         # set max completion token length
         retries=int(os.getenv("AGENT_RETRIES", "2")),  # Increased for better reliability
-        reasoning=False,
+     #   reasoning=True,
         debug_mode=os.getenv("DEBUG_MODE", "false").lower() == "true",
         debug_level=int(os.getenv("DEBUG_LEVEL", "1")),
     )

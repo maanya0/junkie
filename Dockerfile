@@ -1,25 +1,35 @@
-# Use Python 3.12 slim for small size
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1.7
 
-# Avoid interactive prompts
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Set working directory
+########## BUILDER ##########
+FROM python:3.12-slim AS builder
 WORKDIR /app
 
-# If you have any pip packages from Git, keep git. Otherwise skip it.
+# Install git for requirements.txt Git URLs
 RUN apt-get update && \
     apt-get install -y --no-install-recommends git && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
+# Install uv
+RUN pip install uv
+
+# Copy requirements file
 COPY requirements.txt .
 
-# Install Python dependencies efficiently
-RUN pip install --no-cache-dir -r requirements.txt
+# Install everything into a local environment using uv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements.txt
 
-# Copy application code
+# Copy the project source
 COPY . .
 
-# Start the app
+########## FINAL IMAGE ##########
+FROM python:3.12-slim
+WORKDIR /app
+
+# Copy the installed Python environment
+COPY --from=builder /usr/local /usr/local
+
+# Copy the app code
+COPY . .
+
 CMD ["python", "main.py"]
