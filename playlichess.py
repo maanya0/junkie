@@ -227,19 +227,20 @@ def setup_playlichess(bot):
     @bot.command("playlichess")
     async def _cmd_playlichess(ctx, *args):
         # only allow self (selfbot pattern)
-        try:
-            my_user_id = ctx.bot.user.id
-        except Exception:
-            my_user_id = getattr(bot, "bot", None) and getattr(bot.bot, "user", None) and getattr(bot.bot.user, "id", None)
+       # try:
+            #my_user_id = ctx.bot.user.id
+     #   except Exception:
+         #   my_user_id = getattr(bot, "bot", None) and getattr(bot.bot, "user", None) and getattr(bot.bot.user, "id", None)
 
-        if getattr(ctx, "author", None) and getattr(ctx.author, "id", None) != my_user_id:
-            return
+      #  if getattr(ctx, "author", None) and getattr(ctx.author, "id", None) != my_user_id:
+        #    return
 
         # quickly delete the invoking message (same pattern as tldr.py)
         try:
             await ctx.message.delete(delay=1.5)
         except Exception:
             # ignore deletion failure
+         #   await ctx.send("creating..." ,delete_after=3)
             pass
 
         # If user asked for help explicitly
