@@ -288,7 +288,7 @@ async def _chunked_redis_delete(redis_client, base_key: str, keep_base: bool = F
 # Fetch + Cache Recent Messages
 # ──────────────────────────────────────────────
 
-async def get_recent_context(channel, limit: int = 500) -> List[str]:
+async def get_recent_context(channel, limit: int = 500, before_message=None) -> List[str]:
     """
     Get up to `limit` most recent messages from a Discord channel.
     Uses layered caching: in-memory → Redis → Discord API.
@@ -296,6 +296,7 @@ async def get_recent_context(channel, limit: int = 500) -> List[str]:
     Args:
         channel: Discord channel object
         limit: Maximum number of messages to fetch (no capping - chunking handles large sizes)
+        before_message: Optional message object - if provided, fetch messages before this message
 
     Returns:
         list[str]: formatted messages like "User(ID): message"
@@ -308,10 +309,11 @@ async def get_recent_context(channel, limit: int = 500) -> List[str]:
     channel_id = channel.id
     mem_entry = _memory_cache.get(channel_id)
 
-    logger.info(f"[get_recent_context] Requested {limit} messages for channel {channel_id}")
+    logger.info(f"[get_recent_context] Requested {limit} messages for channel {channel_id}, before_message={before_message.id if before_message else None}")
 
     # 1. In-memory cache hit
-    if mem_entry and now - mem_entry["timestamp"] < CACHE_TTL:
+    # Only use cache if we're not fetching before a specific message (which means we need fresh data)
+    if mem_entry and now - mem_entry["timestamp"] < CACHE_TTL and before_message is None:
         cached_count = len(mem_entry["data"])
         logger.info(f"[get_recent_context] In-memory cache hit: {cached_count} messages available")
         # Return up to requested limit
@@ -323,9 +325,10 @@ async def get_recent_context(channel, limit: int = 500) -> List[str]:
         return mem_entry["data"].copy()  # Return copy to prevent mutation
 
     # 2. Redis cache hit
+    # Only use cache if we're not fetching before a specific message (which means we need fresh data)
     redis_key = f"context:{channel_id}"
     redis_client = get_redis_client()
-    if redis_client:
+    if redis_client and before_message is None:
         try:
             data = await _chunked_redis_get(redis_client, redis_key)
             if data:
@@ -343,18 +346,61 @@ async def get_recent_context(channel, limit: int = 500) -> List[str]:
             logger.debug(f"[get_recent_context] Redis cache miss or error for {channel_id}: {e}")
 
     # 3. Fetch from Discord API
-    logger.info(f"[get_recent_context] Fetching {effective_limit} messages from Discord API for channel {channel_id}")
+    # If before_message is provided, fetch messages BEFORE that message (excludes the current message)
+    # Otherwise, fetch the most recent messages
+    if before_message:
+        logger.info(f"[get_recent_context] Fetching {effective_limit} messages BEFORE message {before_message.id} from Discord API")
+    else:
+        logger.info(f"[get_recent_context] Fetching {effective_limit} messages from Discord API for channel {channel_id}")
+    
     try:
         messages = []
         current_time = datetime.now(timezone.utc)
         fetched_count = 0
-        async for m in channel.history(limit=effective_limit):
-            fetched_count += 1
-            # Include all messages (both user and bot) for full context
-            if m.content.strip():
-                messages.append(m)
         
-        logger.info(f"[get_recent_context] Fetched {fetched_count} messages from Discord, {len(messages)} have content")
+        # Fetch messages before the specified message if provided, otherwise fetch most recent
+        # We fetch more than the limit to account for messages that might be filtered out (empty content, embeds-only, etc.)
+        # discord.py handles pagination internally, so we can request more than 100
+        # Fetch 50% more to account for filtering (e.g., 750 for 500 target)
+        fetch_limit = int(effective_limit * 1.5)
+        max_discord_limit = 100  # Discord API limit per request, but discord.py handles pagination
+        
+        if before_message:
+            # Fetch messages, continuing until we have enough with content
+            async for m in channel.history(limit=fetch_limit, before=before_message):
+                fetched_count += 1
+                # Include all messages (both user and bot) for full context
+                # Only filter out completely empty messages (no content at all)
+                if m.content and m.content.strip():
+                    messages.append(m)
+                    # Stop once we have enough messages with content
+                    if len(messages) >= effective_limit:
+                        break
+        else:
+            # Fetch messages, continuing until we have enough with content
+            async for m in channel.history(limit=fetch_limit):
+                fetched_count += 1
+                # Include all messages (both user and bot) for full context
+                # Only filter out completely empty messages (no content at all)
+                if m.content and m.content.strip():
+                    messages.append(m)
+                    # Stop once we have enough messages with content
+                    if len(messages) >= effective_limit:
+                        break
+        
+        logger.info(
+            f"[get_recent_context] Fetched {fetched_count} total messages from Discord, "
+            f"{len(messages)} have content (target: {effective_limit}, "
+            f"filtered out: {fetched_count - len(messages)})"
+        )
+        
+        if len(messages) < effective_limit:
+            logger.warning(
+                f"[get_recent_context] Only got {len(messages)} messages with content "
+                f"(requested {effective_limit}). This may be because: "
+                f"1) Channel has fewer than {effective_limit} messages with content, "
+                f"2) Many messages were filtered out (embeds-only, system messages, etc.)"
+            )
         
         messages.reverse()  # chronological order (oldest → newest)
 
@@ -403,61 +449,20 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None):
     
     logger.info(f"[build_context_prompt] Building prompt with limit={limit} for channel {message.channel.id}")
     
-    # Get context with limit+1 to account for the current message that might be in cache
-    # This ensures we get exactly 'limit' messages excluding the current one
-    requested_limit = limit + 1
-    logger.info(f"[build_context_prompt] Requesting {requested_limit} messages to account for current message")
-    context_lines = await get_recent_context(message.channel, limit=requested_limit)
+    # Fetch messages BEFORE the current message to get the previous 'limit' messages
+    # This ensures we get exactly 'limit' messages that occurred before the current one
+    logger.info(f"[build_context_prompt] Fetching {limit} messages BEFORE current message {message.id}")
+    context_lines = await get_recent_context(message.channel, limit=limit, before_message=message)
     
-    logger.info(f"[build_context_prompt] Received {len(context_lines)} messages from get_recent_context")
+    logger.info(f"[build_context_prompt] Received {len(context_lines)} messages from get_recent_context (target: {limit})")
     
-    # Exclude the current message from context (it will be added separately below)
-    # The current message is likely the last one in the list (most recent)
-    current_message_content = message.clean_content
-    current_author_id = str(message.author.id)
-    current_author_name = message.author.display_name
+    # Ensure we have exactly 'limit' messages (or as many as available)
+    if len(context_lines) > limit:
+        context_lines = context_lines[-limit:]
+        logger.info(f"[build_context_prompt] Trimmed to last {limit} messages")
+    elif len(context_lines) < limit:
+        logger.warning(f"[build_context_prompt] Only {len(context_lines)} messages available (requested {limit})")
     
-    logger.debug(f"[build_context_prompt] Current message: {current_author_name}({current_author_id}): {current_message_content[:50]}...")
-    
-    # Filter out the current message from context
-    # Check the last few messages (most recent) to find and remove the current one
-    filtered_context = []
-    found_current = False
-    
-    for i, line in enumerate(context_lines):
-        # Check if this line matches the current message
-        # Format: "[timestamp] Name(ID): content"
-        # We check if it contains the author ID, author name, and message content
-        is_current = (
-            current_author_id in line and
-            current_author_name in line and
-            current_message_content in line
-        )
-        
-        # Additional validation: the line should end with the message content
-        # (to avoid false matches with partial content)
-        if is_current and line.rstrip().endswith(current_message_content):
-            found_current = True
-            logger.info(f"[build_context_prompt] Found and excluded current message at index {i}")
-            continue  # Skip the current message
-        
-        filtered_context.append(line)
-    
-    if not found_current:
-        logger.warning(f"[build_context_prompt] Current message not found in context (may not be cached yet)")
-    
-    # If we didn't find the current message in context (cache miss scenario),
-    # just take the last 'limit' messages
-    if not found_current and len(filtered_context) > limit:
-        filtered_context = filtered_context[-limit:]
-        logger.info(f"[build_context_prompt] Taking last {limit} messages (current not found)")
-    elif len(filtered_context) > limit:
-        # If we found and removed current message, we should have exactly limit or limit+1
-        # Take the last 'limit' messages
-        filtered_context = filtered_context[-limit:]
-        logger.info(f"[build_context_prompt] Taking last {limit} messages after removing current")
-    
-    context_lines = filtered_context
     logger.info(f"[build_context_prompt] Final context has {len(context_lines)} messages (target: {limit})")
     
     # Get current date/time with timezone
