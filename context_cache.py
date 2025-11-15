@@ -295,13 +295,14 @@ async def get_recent_context(channel, limit: int = 500) -> List[str]:
 
     Args:
         channel: Discord channel object
-        limit: Maximum number of messages to fetch (will be capped at MAX_MESSAGES_IN_CACHE)
+        limit: Maximum number of messages to fetch (no capping - chunking handles large sizes)
 
     Returns:
         list[str]: formatted messages like "User(ID): message"
     """
-    # Cap the limit to prevent Redis size issues
-    effective_limit = min(limit, MAX_MESSAGES_IN_CACHE)
+    # Don't cap the limit - allow fetching up to the requested amount
+    # The chunking system will handle large data sizes
+    effective_limit = limit
     
     now = time.time()
     channel_id = channel.id
@@ -364,6 +365,7 @@ async def get_recent_context(channel, limit: int = 500) -> List[str]:
 async def build_context_prompt(message, raw_prompt: str, limit: int = None):
     """
     Build a model-ready text prompt with up to `limit` recent messages.
+    Excludes the current message from context (it will be added separately).
     Includes current date/time for temporal awareness.
     """
     # Use MAX_MESSAGES_IN_CACHE as default if limit not specified
@@ -371,7 +373,50 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None):
         limit = MAX_MESSAGES_IN_CACHE
     
     user_label = f"{message.author.display_name}({message.author.id})"
-    context_lines = await get_recent_context(message.channel, limit=limit)
+    
+    # Get context with limit+1 to account for the current message that might be in cache
+    # This ensures we get exactly 'limit' messages excluding the current one
+    context_lines = await get_recent_context(message.channel, limit=limit + 1)
+    
+    # Exclude the current message from context (it will be added separately below)
+    # The current message is likely the last one in the list (most recent)
+    current_message_content = message.clean_content
+    current_author_id = str(message.author.id)
+    current_author_name = message.author.display_name
+    
+    # Filter out the current message from context
+    # Check the last few messages (most recent) to find and remove the current one
+    filtered_context = []
+    found_current = False
+    
+    for i, line in enumerate(context_lines):
+        # Check if this line matches the current message
+        # Format: "[timestamp] Name(ID): content"
+        # We check if it contains the author ID, author name, and message content
+        is_current = (
+            current_author_id in line and
+            current_author_name in line and
+            current_message_content in line
+        )
+        
+        # Additional validation: the line should end with the message content
+        # (to avoid false matches with partial content)
+        if is_current and line.rstrip().endswith(current_message_content):
+            found_current = True
+            continue  # Skip the current message
+        
+        filtered_context.append(line)
+    
+    # If we didn't find the current message in context (cache miss scenario),
+    # just take the last 'limit' messages
+    if not found_current and len(filtered_context) > limit:
+        filtered_context = filtered_context[-limit:]
+    elif len(filtered_context) > limit:
+        # If we found and removed current message, we should have exactly limit or limit+1
+        # Take the last 'limit' messages
+        filtered_context = filtered_context[-limit:]
+    
+    context_lines = filtered_context
     
     # Get current date/time with timezone
     now = datetime.now(timezone.utc)

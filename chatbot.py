@@ -556,8 +556,8 @@ def setup_chat(bot):
                 return
 
             # Step 2: build context-aware prompt
-            # Use default limit (MAX_MESSAGES_IN_CACHE from context_cache)
-            prompt = await build_context_prompt(message, raw_prompt)
+            # Request 500 messages (current message will be excluded and added separately)
+            prompt = await build_context_prompt(message, raw_prompt, limit=500)
 
             # Step 3: run the agent (shared session per channel)
             async with message.channel.typing():
