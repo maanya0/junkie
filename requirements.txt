@@ -7,7 +7,7 @@ opentelemetry-exporter-otlp
 atla-insights[openai]
 # Pin discord.py-self to a commit known to work with Python 3.12
 git+https://github.com/dolfies/discord.py-self.git@97e06c393f6e8f30d00fe0dd9cdf7196145fa851#egg=discord.py-self
-
+e2b_code_interpreter
 # Environment variable management
 python-dotenv>=1.0.0
 #
