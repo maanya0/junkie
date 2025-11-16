@@ -440,31 +440,66 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None):
     Build a model-ready text prompt with up to `limit` recent messages.
     Excludes the current message from context (it will be added separately).
     Includes current date/time for temporal awareness.
+
+    This version also injects channel metadata (channel id, name, guild id/name,
+    and channel type) at the top so the model always knows which channel the
+    conversation came from.
     """
     # Use MAX_MESSAGES_IN_CACHE as default if limit not specified
     if limit is None:
         limit = MAX_MESSAGES_IN_CACHE
-    
+
     user_label = f"{message.author.display_name}({message.author.id})"
-    
+
     logger.info(f"[build_context_prompt] Building prompt with limit={limit} for channel {message.channel.id}")
-    
+
     # Fetch messages BEFORE the current message to get the previous 'limit' messages
-    # This ensures we get exactly 'limit' messages that occurred before the current one
     logger.info(f"[build_context_prompt] Fetching {limit} messages BEFORE current message {message.id}")
     context_lines = await get_recent_context(message.channel, limit=limit, before_message=message)
-    
+
     logger.info(f"[build_context_prompt] Received {len(context_lines)} messages from get_recent_context (target: {limit})")
-    
-    # Ensure we have exactly 'limit' messages (or as many as available)
+
+    # Trim or warn as before
     if len(context_lines) > limit:
         context_lines = context_lines[-limit:]
         logger.info(f"[build_context_prompt] Trimmed to last {limit} messages")
     elif len(context_lines) < limit:
         logger.warning(f"[build_context_prompt] Only {len(context_lines)} messages available (requested {limit})")
-    
+
     logger.info(f"[build_context_prompt] Final context has {len(context_lines)} messages (target: {limit})")
-    
+
+    # Channel / guild metadata (safe guard for DMs / missing attrs)
+    try:
+        channel_id = getattr(message.channel, "id", "unknown")
+        channel_name = getattr(message.channel, "name", "DM")
+    except Exception:
+        channel_id = "unknown"
+        channel_name = "unknown"
+
+    try:
+        guild_id = getattr(message.guild, "id", "DM")
+        guild_name = getattr(message.guild, "name", "DM")
+    except Exception:
+        guild_id = "DM"
+        guild_name = "DM"
+
+    # channel type if available (discord.py enums)
+    try:
+        ch_type = getattr(message.channel, "type", None)
+        # If it's an enum, convert to string name, else str()
+        channel_type = ch_type.name if hasattr(ch_type, "name") else str(ch_type)
+    except Exception:
+        channel_type = "unknown"
+
+    channel_meta = (
+        f"Channel ID: {channel_id}\n"
+        f"Channel Name: {channel_name}\n"
+        f"Channel Type: {channel_type}\n"
+        f"Guild ID: {guild_id}\n"
+        f"Guild Name: {guild_name}\n"
+        "----\n"
+    )
+
     # Get current date/time with timezone
     now = datetime.now(timezone.utc)
     if _has_pytz and _timezone != timezone.utc:
@@ -472,10 +507,9 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None):
             now = now.astimezone(_timezone)
         except Exception:
             pass
-    
+
     # Format current time with proper timezone display
     if _has_pytz:
-        # Get timezone abbreviation (IST, etc.)
         try:
             tz_abbr = now.strftime("%Z") or _timezone_str
         except Exception:
@@ -485,13 +519,15 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None):
     else:
         current_time_str = now.strftime("%Y-%m-%d %H:%M:%S UTC")
         timezone_name = "UTC (pytz not installed - install pytz for IST support)"
-    
+
     # Format message timestamp
     message_timestamp = format_message_timestamp(message.created_at, now)
     if not message_timestamp:
         message_timestamp = "[now]"
 
+    # Build prompt: metadata first so model sees it at the start
     prompt = (
+        f"{channel_meta}"
         f"Current Date/Time: {current_time_str} ({timezone_name})\n"
         f"Timezone: Indian Standard Time (IST) - Asia/Kolkata (UTC+5:30)\n"
         f"All message timestamps are relative to this current time and displayed in IST.\n\n"
