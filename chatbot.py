@@ -30,7 +30,7 @@ def init_e2b_sandbox(agent: Agent, timeout: int = 600) -> str:
 
     # Dynamically add its tools to this agent
     # This is fully supported by Agno's design
-    agent.add_toolkit(e2b_tools)
+    agent.add_tool(e2b_tools)
 
     return f"E2B sandbox initialized with timeout={timeout}s. Tools added."
 # ---------- env ----------
