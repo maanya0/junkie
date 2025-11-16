@@ -16,9 +16,23 @@ from agno.tools.googlesearch import GoogleSearchTools
 from agno.tools.mcp import MultiMCPTools
 from agno.tools.wikipedia import WikipediaTools
 from agno.tools.e2b import E2BTools
-e2b_tools = E2BTools(
-    timeout=600,  # 10 minutes timeout (in seconds)
-)
+from agno.tools import tool
+from agno.agent import Agent
+from agno.tools.e2b import E2BTools
+
+@tool
+def init_e2b_sandbox(agent: Agent, timeout: int = 600) -> str:
+    """
+    Initializes a fresh E2B sandbox and dynamically adds E2B tools that control the sandbox.
+    """
+    # Create a new E2BTools instance
+    e2b_tools = E2BTools(timeout=timeout)
+
+    # Dynamically add its tools to this agent
+    # This is fully supported by Agno's design
+    agent.add_toolkit(e2b_tools)
+
+    return f"E2B sandbox initialized with timeout={timeout}s. Tools added."
 # ---------- env ----------
 from dotenv import load_dotenv
 
@@ -404,7 +418,7 @@ def create_model_and_agent(user_id: str):
     # Create agent for this user
     tools_list = [
         ExaTools(),
-        e2b_tools,
+        init_e2b_sandbox,
         CalculatorTools(),
         WikipediaTools(),
         GoogleSearchTools(),
