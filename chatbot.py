@@ -15,7 +15,10 @@ from agno.tools.exa import ExaTools
 from agno.tools.googlesearch import GoogleSearchTools
 from agno.tools.mcp import MultiMCPTools
 from agno.tools.wikipedia import WikipediaTools
-
+from agno.tools.e2b import E2BTools
+e2b_tools = E2BTools(
+    timeout=600,  # 10 minutes timeout (in seconds)
+)
 # ---------- env ----------
 from dotenv import load_dotenv
 
@@ -400,11 +403,13 @@ def create_model_and_agent(user_id: str):
 
     # Create agent for this user
     tools_list = [
-        fetch_url,
-        GoogleSearchTools(),
-        WikipediaTools(),
-        CalculatorTools(),
         ExaTools(),
+        e2b_tools,
+        CalculatorTools(),
+        WikipediaTools(),
+        GoogleSearchTools(),
+        fetch_url,
+        
     ]
     # Add MCP tools if available
     mcp = get_mcp_tools()
