@@ -204,7 +204,7 @@ def get_mcp_tools():
         else:
             # Default fallback
             urls = [
-                "https://server.smithery.ai/@codebyyassine/discordselfbot-mcp/mcp?api_key=c51f0d96-1719-4c10-8f64-16b63cd9a1cc&profile=subjective-cat-qX93Yx",
+                "https://litellm1-production-4090.up.railway.app/mcp/",
             ]
         
         if urls:
