@@ -20,7 +20,8 @@ from agno.tools import tool
 from agno.agent import Agent
 from e2b_tools import SandboxManager, E2BToolkit
 from agno.tools.mcp import MCPTools
-
+from agno.tools.sleep import SleepTools
+from agno.tools.youtube import YouTubeTools
 # Initialize and connect to the MCP server
 
 manager = SandboxManager(api_key=None, default_timeout=360)
@@ -449,10 +450,12 @@ def create_model_and_agent(user_id: str):
     # Create agent for this user
     tools_list = [
         ExaTools(),
-        init_e2b_sandbox,
+        e2b_toolkit,
         CalculatorTools(),
         WikipediaTools(),
         GoogleSearchTools(),
+        YouTubeTools(),
+        SleepTools(),
         fetch_url,
         
     ]
