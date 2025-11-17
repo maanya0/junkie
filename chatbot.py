@@ -18,22 +18,16 @@ from agno.tools.wikipedia import WikipediaTools
 from agno.tools.e2b import E2BTools
 from agno.tools import tool
 from agno.agent import Agent
-from agno.tools.e2b import E2BTools
+from e2b_tools import SandboxManager, E2BToolkit
+from agno.tools.mcp import MCPTools
 
-@tool
-def init_e2b_sandbox(agent: Agent, timeout: int = 600) -> str:
-    """
-    Initializes a fresh E2B sandbox and dynamically adds E2B tools that control the sandbox.
-    """
-    # Create a new E2BTools instance
-    e2b_tools = E2BTools(timeout=timeout)
+# Initialize and connect to the MCP server
 
-    # Dynamically add its tools to this agent
-    # This is fully supported by Agno's design
-    agent.add_tool(e2b_tools)
+manager = SandboxManager(api_key=None, default_timeout=360)
+# 2. Create the Toolkit with an auto-created default sandbox
+e2b_toolkit = E2BToolkit(manager, auto_create_default=False)
 
-    return f"E2B sandbox initialized with timeout={timeout}s. Tools added."
-# ---------- env ----------
+
 from dotenv import load_dotenv
 
 from context_cache import (
@@ -318,13 +312,16 @@ The assistant is running as a discord self-bot.
    - Embed generated images using Markdown image syntax
    - Generate images with clear, descriptive prompts
    - Never use alternative image generation methods
+   
 ### E2B Sandbox Usage & Initialization Protocol (CRITICAL)
 
 The E2B sandbox is a secure, isolated environment that allows you to run code and perform programmatic operations.  
-You MUST initialize the sandbox before using any of its capabilities.
+You must create the sandbox before using any of its capabilities if there sre no sandboxes running already.
+Do not use timeout greater than 1 hour for creation of a sandbox.
+Prefer shorter timout based on the usage.
 
 #### What the E2B Sandbox Can Be Used For
-Once initialized, the sandbox provides tools that allow you to:
+Once created, the sandbox provides tools that allow you to:
 
 1. **Execute Python code**
    - run Python scripts
@@ -351,35 +348,7 @@ Once initialized, the sandbox provides tools that allow you to:
 5. **Host Temporary Servers (if needed)**
    - run a web server inside the sandbox
    - expose it through a public URL
-
-These abilities are ONLY available after the sandbox has been initialized.
-
 ---
-
-#### Sandbox Initialization Requirements
-
-Before using ANY E2B sandbox tool (including but not limited to:  
-run_python_code, run_command, upload_file, list_files, read_file_content, write_file_content, download_png_result, download_file_from_sandbox, etc.):
-
-1. **Always call this tool first:**
-       init_e2b_sandbox(timeout=600)
-
-2. Calling `init_e2b_sandbox` will:
-   - Create a new, isolated E2B sandbox
-   - Add all E2B sandbox tools dynamically to your toolset
-   - Allow you to perform code execution, file operations, command execution, and artifact generation
-
-3. If ANY E2B tool fails due to timeout, missing sandbox, or sandbox reset:
-   - Immediately call `init_e2b_sandbox` again
-   - Then retry your previous action
-
-4. Do NOT assume the sandbox from previous messages still exists.
-   If you are unsure whether the sandbox is active, always initialize it again.
-
-5. When beginning any task that involves code execution, file manipulation, or shell commands:
-   - Initialize a fresh sandbox by calling `init_e2b_sandbox` first.
-
-This protocol ensures reliable, safe, and consistent use of the E2B sandbox.
 
 ## Discord-Specific Protocols
 
