@@ -12,7 +12,6 @@ from agno.models.openai import OpenAILike
 from agno.tools import tool
 from agno.tools.calculator import CalculatorTools
 from agno.tools.exa import ExaTools
-from agno.tools.googlesearch import GoogleSearchTools
 from agno.tools.mcp import MultiMCPTools
 from agno.tools.wikipedia import WikipediaTools
 from agno.tools.e2b import E2BTools
@@ -123,66 +122,6 @@ if os.getenv("TRACING", "false").lower() == "true":
 
 
 # ---------- web tools ----------
-@tool(
-    name="fetch_url_content",
-    cache_results=True,
-    cache_dir="/tmp/agno_cache",
-    cache_ttl=3600,
-)
-async def fetch_url(url: str) -> str:
-    """
-    Use this function to get content from a URL. This tool fetches and extracts text content
-    from web pages, removing HTML tags and formatting for readability.
-
-    Args:
-        url (str): URL to fetch. Must be a valid HTTP/HTTPS URL.
-
-    Returns:
-        str: Cleaned text content of the URL (up to 3000 characters), or an error message if fetch fails.
-    """
-    if not url or not url.strip():
-        return "Error: URL is required"
-    
-    # Basic URL validation
-    if not url.startswith(("http://", "https://")):
-        return f"Error: Invalid URL format. URL must start with http:// or https://"
-    
-    try:
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=10),
-            headers={"User-Agent": "Mozilla/5.0 (compatible; JunkieBot/1.0)"}
-        ) as session:
-            async with session.get(url, allow_redirects=True) as response:
-                if response.status != 200:
-                    return f"Error: HTTP {response.status} - Failed to fetch URL"
-                
-                # Try to get text content
-                try:
-                    text = await response.text()
-                except Exception as e:
-                    return f"Error: Could not decode content - {str(e)}"
-                
-                # Clean HTML tags
-                text = re.sub(r"<[^>]+>", "", text)
-                # Normalize whitespace
-                text = re.sub(r"\s+", " ", text)
-                text = text.strip()
-                
-                if not text:
-                    return "Error: No text content found on this page"
-                
-                # Return first 3000 chars with indication if truncated
-                if len(text) > 3000:
-                    return text[:3000] + "\n\n[Content truncated - showing first 3000 characters]"
-                return text
-                
-    except aiohttp.ClientError as e:
-        return f"Error: Network error - {str(e)}"
-    except asyncio.TimeoutError:
-        return "Error: Request timed out after 10 seconds"
-    except Exception as e:
-        return f"Error: Unexpected error - {str(e)}"
-
 
 # MCP tools - lazy initialization to avoid startup overhead
 _mcp_tools = None
@@ -216,7 +155,7 @@ def get_mcp_tools():
 
 SYSTEM_PROMPT = """
 ## Role
-You are Junkie Companion, a helpful Discord-specific AI assistant designed to provide concise, accurate, and user-friendly responses within the Discord platform environment.
+You are Hero Companion, a helpful Discord-specific AI assistant designed to provide concise, accurate, and user-friendly responses within the Discord platform environment.
 
 ## Task
 Provide clear, direct assistance to users in Discord conversations, adapting communication style and depth based on user preferences and query complexity.
@@ -453,11 +392,8 @@ def create_model_and_agent(user_id: str):
         e2b_toolkit,
         CalculatorTools(),
         WikipediaTools(),
-        GoogleSearchTools(),
         YouTubeTools(),
-        SleepTools(),
-        fetch_url,
-        
+        SleepTools(), 
     ]
     # Add MCP tools if available
     mcp = get_mcp_tools()
