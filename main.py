@@ -17,7 +17,6 @@ bot = SelfBot(
 )
 
 setup_tldr(bot)
-setup_playlichess(bot)
 setup_chat(bot)
 
 if __name__ == "__main__":
