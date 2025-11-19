@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from chatbot import setup_chat
 from selfbot import SelfBot
 from tldr import setup_tldr
-from playlichess import setup_playlichess
 
 load_dotenv()
 
