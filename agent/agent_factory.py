@@ -101,7 +101,7 @@ def create_team_for_user(user_id: str):
     # 1. Web agent (Search + Wikipedia + YouTube)
     web_agent = Agent(
         name="Web Agent",
-        model="gpt-5",
+        model=model,
         tools=[
             ExaTools(), 
             WikipediaTools(), 
