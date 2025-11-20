@@ -101,7 +101,19 @@ def create_team_for_user(user_id: str):
     # 1. Web agent (Search + Wikipedia + YouTube)
     web_agent = Agent(
         name="Web Agent",
-        model=model,
+        model=OpenAILike(
+        id="gpt-5",
+        temperature=MODEL_TEMPERATURE,
+        top_p=MODEL_TOP_P,
+        base_url=PROVIDER,
+        api_key=CUSTOM_PROVIDER_API_KEY,
+        client_params={
+            "default_headers": {
+                "x-supermemory-api-key": SUPERMEMORY_KEY,
+                "x-sm-user-id": user_id
+            }
+        }
+    ),
         tools=[
             ExaTools(), 
             WikipediaTools(), 
@@ -115,6 +127,7 @@ def create_team_for_user(user_id: str):
         name="Code Agent",
         model=model,
         tools=[
+            ExaTools(),
             e2b_toolkit,
             CalculatorTools(),
             SleepTools()
