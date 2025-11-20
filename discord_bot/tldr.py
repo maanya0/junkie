@@ -6,7 +6,7 @@ import os
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-from selfbot import SelfBot
+from discord_bot.selfbot import SelfBot
 
 # ──────────────────────────────────────────────
 # LLM Client (Groq / OpenAI-compatible)

@@ -4,9 +4,9 @@ import os
 
 from dotenv import load_dotenv
 
-from chatbot import setup_chat
-from selfbot import SelfBot
-from tldr import setup_tldr
+from discord_bot.chat_handler import setup_chat
+from discord_bot.selfbot import SelfBot
+from discord_bot.tldr import setup_tldr
 
 load_dotenv()
 
