@@ -1,7 +1,6 @@
 import os
 import logging
 from agno.agent import Agent
-from agno.team import Team
 from agno.db.redis import RedisDb
 from agno.models.openai import OpenAILike
 
@@ -22,35 +21,30 @@ from agent.system_prompt import get_system_prompt
 from tools.tools_factory import get_mcp_tools
 from core.observability import setup_phoenix_tracing
 
-
-# -----------------------------------
-# Initialize E2B Sandbox
-# -----------------------------------
+# Initialize E2B
 manager = SandboxManager(api_key=None, default_timeout=360)
 e2b_toolkit = E2BToolkit(manager, auto_create_default=False)
 
-
-# -----------------------------------
-# Database setup (optional Redis memory)
-# -----------------------------------
+# Database setup
 db = RedisDb(db_url=REDIS_URL, memory_table="junkie_memories") if USE_REDIS else None
 
-
-# -----------------------------------
-# Initialize tracing (Phoenix)
-# -----------------------------------
+# Initialize tracing if enabled
 setup_phoenix_tracing()
 
-
-# -------------------------------------------------------------
-# Helper: Create Model
-# -------------------------------------------------------------
-def create_model(user_id: str):
-    """Create a model instance for a specific user."""
+def create_model_and_agent(user_id: str):
+    """
+    Create a model and agent instance for a specific user.
     
+    Args:
+        user_id (str): The Discord user ID
+        
+    Returns:
+        tuple: (model, agent) instances configured for the user
+    """
+    # Set up the model using the provider and model name
     if PROVIDER == "groq":
-        return OpenAILike(
-            id=MODEL_NAME,
+        model = OpenAILike(
+            id=MODEL_NAME, 
             max_tokens=4096,
             temperature=MODEL_TEMPERATURE,
             top_p=MODEL_TOP_P,
@@ -63,126 +57,77 @@ def create_model(user_id: str):
                 }
             }
         )
-
-    # Custom provider
-    return OpenAILike(
-        id=MODEL_NAME,
-        max_tokens=4096,
-        temperature=MODEL_TEMPERATURE,
-        top_p=MODEL_TOP_P,
-        base_url=PROVIDER,
-        api_key=CUSTOM_PROVIDER_API_KEY,
-        client_params={
-            "default_headers": {
-                "x-supermemory-api-key": SUPERMEMORY_KEY,
-                "x-sm-user-id": user_id
-            }
-        }
-    )
-
-
-# -------------------------------------------------------------
-# Create Team For User
-# -------------------------------------------------------------
-def create_team_for_user(user_id: str):
-    """
-    Create a full AI Team for a specific user.
-
-    Returns:
-        tuple: (model, team)
-    """
-
-    model = create_model(user_id)
-
-    # ---------------------------------------------------------
-    # Specialized Sub-Agents
-    # ---------------------------------------------------------
-
-    # 1. Web agent (Search + Wikipedia + YouTube)
-    web_agent = Agent(
-        name="Web Agent",
-        model=model,
-        tools=[
-            ExaTools(), 
-            WikipediaTools(), 
-            YouTubeTools()
-        ],
-        instructions="You specialize in searching the web, YouTube, and Wikipedia for fresh, accurate information."
-    )
-
-    # 2. Code agent (Sandbox execution & calculator)
-    code_agent = Agent(
-        name="Code Agent",
-        model=model,
-        tools=[
-            e2b_toolkit,
-            CalculatorTools()
-        ],
-        instructions="You specialize in writing, executing, and debugging code. You also handle math and complex calculations."
-    )
-
-    # 3. Sleep / utility agent (long-running tasks)
-    utility_agent = Agent(
-        name="Utility Agent",
-        model=model,
-        tools=[SleepTools()],
-        instructions="You handle timed tasks, delayed actions, and background operations."
-    )
-
-    # 4. Optional MCP tools agent
-    mcp_tools = get_mcp_tools()
-    if mcp_tools:
-        mcp_agent = Agent(
-            name="MCP Tools Agent",
-            model=model,
-            tools=[mcp_tools],
-            instructions="You specialize in handling MCP-based tool interactions."
-        )
-        agents = [web_agent, code_agent, utility_agent, mcp_agent]
     else:
-        agents = [web_agent, code_agent, utility_agent]
+        model = OpenAILike(
+            id=MODEL_NAME,
+            base_url=PROVIDER,
+            max_tokens=4096,
+            temperature=MODEL_TEMPERATURE,
+            top_p=MODEL_TOP_P,
+            api_key=CUSTOM_PROVIDER_API_KEY,
+            client_params={
+                "default_headers": {
+                    "x-supermemory-api-key": SUPERMEMORY_KEY,
+                    "x-sm-user-id": user_id
+                }
+            }
+        )
 
-    # ---------------------------------------------------------
-    # Team Leader (Orchestrator)
-    # ---------------------------------------------------------
-    team = Team(
-        name="Junkie Team",
+    # Create agent for this user
+    tools_list = [
+        ExaTools(),
+        e2b_toolkit,
+        CalculatorTools(),
+        WikipediaTools(),
+        YouTubeTools(),
+        SleepTools(), 
+    ]
+    # Add MCP tools if available
+    mcp = get_mcp_tools()
+    if mcp:
+        tools_list.append(mcp)
+    
+    agent = Agent(
+        name="Junkie",
         model=model,
+        # Add a database to the Agent
         db=db,
-        members=agents,
-        instructions=get_system_prompt(),   # Your main system prompt applies to the entire team
+        tools=tools_list,
+        # Add the previous session history to the context
+        instructions=get_system_prompt(),
         num_history_runs=AGENT_HISTORY_RUNS,
         add_datetime_to_context=True,
-        timezone_identifier="Asia/Kolkata",
-        markdown=True,
-        show_members_responses=True,        # Shows which agent responded
+        timezone_identifier="Asia/Kolkata",  # IST timezone for datetime context
+        search_session_history=True,
+        # set max completion token length
         retries=AGENT_RETRIES,
         debug_mode=DEBUG_MODE,
         debug_level=DEBUG_LEVEL,
     )
+    
+    return model, agent
 
-    return model, team
+# Cache for user agents to avoid recreating them on every message
+_user_agents = {}
 
-
-# -------------------------------------------------------------
-# TEAM CACHE — per user team instance
-# -------------------------------------------------------------
-_user_teams = {}
-
-
-def get_or_create_team(user_id: str):
+def get_or_create_agent(user_id: str):
     """
-    Get existing team for a user or create a new one.
-    Uses FIFO eviction if cache exceeds MAX_AGENTS.
+    Get existing agent for user or create a new one.
+    Uses LRU-style eviction if cache gets too large.
+    
+    Args:
+        user_id (str): The Discord user ID
+        
+    Returns:
+        Agent: Agent instance for the user
     """
-    if user_id not in _user_teams:
-
-        # If cache full, evict oldest agent entry
-        if len(_user_teams) >= MAX_AGENTS:
-            oldest_key = next(iter(_user_teams))
-            del _user_teams[oldest_key]
-
-        _, team = create_team_for_user(user_id)
-        _user_teams[user_id] = team
-
-    return _user_teams[user_id]
+    if user_id not in _user_agents:
+        # Evict oldest entries if cache is full (simple FIFO)
+        if len(_user_agents) >= MAX_AGENTS:
+            # Remove the first (oldest) entry
+            oldest_key = next(iter(_user_agents))
+            del _user_agents[oldest_key]
+        
+        _, agent = create_model_and_agent(user_id)
+        _user_agents[user_id] = agent
+    return _user_agents[user_id]
