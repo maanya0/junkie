@@ -119,6 +119,8 @@ def create_team_for_user(user_id: str):
             WikipediaTools(), 
             YouTubeTools()
         ],
+        add_datetime_to_context=True,
+        timezone_identifier="Asia/Kolkata",
         instructions="You specialize in searching the web, YouTube, and Wikipedia for fresh, accurate information."
     )
 
@@ -132,6 +134,8 @@ def create_team_for_user(user_id: str):
             CalculatorTools(),
             SleepTools()
         ],
+        add_datetime_to_context=True,
+        timezone_identifier="Asia/Kolkata",
         instructions="You specialize in writing, executing, and debugging code. You also handle math and complex calculations."
     )
 
@@ -143,6 +147,8 @@ def create_team_for_user(user_id: str):
             name="MCP Tools Agent",
             model=model,
             tools=[mcp_tools],
+            add_datetime_to_context=True,
+            timezone_identifier="Asia/Kolkata",
             instructions="You specialize in handling MCP-based tool interactions."
         )
         agents = [web_agent, code_agent, mcp_agent]
