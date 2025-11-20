@@ -117,7 +117,7 @@ def create_team_for_user(user_id: str):
         tools=[
             ExaTools(), 
             WikipediaTools(), 
-            YouTubeTools()
+            YouTubeTools(),
         ],
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
