@@ -147,11 +147,6 @@ def create_team_for_user(user_id: str):
             max_tokens=8000,
             base_url="https://api.groq.com/openai/v1",
             api_key=GROQ_API_KEY),
-        tools=[
-            e2b_toolkit,
-            CalculatorTools(),
-            SleepTools()
-        ],
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
         instructions="You specialize in writing, executing, and debugging code. You also handle math and complex calculations."
