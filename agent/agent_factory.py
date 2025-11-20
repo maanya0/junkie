@@ -101,7 +101,7 @@ def create_team_for_user(user_id: str):
     # 1. Web agent (Search + Wikipedia + YouTube)
     web_agent = Agent(
         name="Web Agent",
-        model=model,
+        model="gpt-5",
         tools=[
             ExaTools(), 
             WikipediaTools(), 
@@ -116,18 +116,12 @@ def create_team_for_user(user_id: str):
         model=model,
         tools=[
             e2b_toolkit,
-            CalculatorTools()
+            CalculatorTools(),
+            SleepTools()
         ],
         instructions="You specialize in writing, executing, and debugging code. You also handle math and complex calculations."
     )
 
-    # 3. Sleep / utility agent (long-running tasks)
-    utility_agent = Agent(
-        name="Utility Agent",
-        model=model,
-        tools=[SleepTools()],
-        instructions="You handle timed tasks, delayed actions, and background operations."
-    )
 
     # 4. Optional MCP tools agent
     mcp_tools = get_mcp_tools()
@@ -138,15 +132,15 @@ def create_team_for_user(user_id: str):
             tools=[mcp_tools],
             instructions="You specialize in handling MCP-based tool interactions."
         )
-        agents = [web_agent, code_agent, utility_agent, mcp_agent]
+        agents = [web_agent, code_agent, mcp_agent]
     else:
-        agents = [web_agent, code_agent, utility_agent]
+        agents = [web_agent, code_agent]
 
     # ---------------------------------------------------------
     # Team Leader (Orchestrator)
     # ---------------------------------------------------------
     team = Team(
-        name="Junkie Team",
+        name="Hero Team",
         model=model,
         db=db,
         members=agents,
