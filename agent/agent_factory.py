@@ -142,7 +142,9 @@ def create_team_for_user(user_id: str):
         name="Code Agent",
         model=model,
         tools=[
-            ExaTools(),
+            ExaTools(), 
+            WikipediaTools(), 
+            YouTubeTools()
             e2b_toolkit,
             CalculatorTools(),
             SleepTools()
@@ -164,9 +166,9 @@ def create_team_for_user(user_id: str):
             timezone_identifier="Asia/Kolkata",
             instructions="You specialize in handling MCP-based tool interactions."
         )
-        agents = [web_agent, code_agent, mcp_agent]
+        agents = [perplexity_agent, code_agent, mcp_agent]
     else:
-        agents = [web_agent, code_agent]
+        agents = [perplexity_agent, code_agent]
 
     # ---------------------------------------------------------
     # Team Leader (Orchestrator)
