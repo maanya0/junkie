@@ -146,7 +146,7 @@ async def get_recent_context(channel, limit: int = 500, before_message=None) -> 
 # Context Builder
 # ──────────────────────────────────────────────
 
-async def build_context_prompt(message, raw_prompt: str, limit: int = None):
+async def build_context_prompt(message, raw_prompt: str, limit: int = None, reply_to_message=None):
     """
     Build a model-ready text prompt.
     """
@@ -185,13 +185,27 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None):
     current_time_str = now.strftime("%Y-%m-%d %H:%M:%S %Z")
     message_timestamp = format_message_timestamp(message.created_at, now) or "[now]"
 
+    # Format Reply Context if present
+    reply_context_str = ""
+    if reply_to_message:
+        reply_ts = format_message_timestamp(reply_to_message.created_at, now)
+        reply_author = f"{reply_to_message.author.display_name}({reply_to_message.author.id})"
+        reply_content = reply_to_message.clean_content
+        reply_context_str = (
+            f"\n[REPLY CONTEXT]\n"
+            f"The user is replying to:\n"
+            f"{reply_ts} {reply_author}: {reply_content}\n"
+            f"----------------\n"
+        )
+
     prompt = (
         f"{channel_meta}"
         f"Current Time: {current_time_str}\n"
         f"Timestamps are relative to this time.\n\n"
         f"Conversation History:\n"
         + "\n".join(context_lines)
-        + f"\n\n{message_timestamp} {user_label} says: {raw_prompt}\n\n"
+        + f"\n{reply_context_str}"
+        + f"\n{message_timestamp} {user_label} says: {raw_prompt}\n\n"
         f"IMPORTANT: The message above is the CURRENT message."
     )
     return prompt

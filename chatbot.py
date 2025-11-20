@@ -383,8 +383,22 @@ def correct_mentions(prompt, response):
     for name in sorted_names:
         uid = name_to_id[name]
         # Regex to match @Name not followed by (ID)
-        # Negative lookahead (?!\s*\() prevents replacing if it's already in Name(ID) format
-        pattern = re.compile(rf"@\b{re.escape(name)}\b(?!\s*\()", re.IGNORECASE)
+        # We use \b for word boundary, but we also need to handle cases where punctuation is immediately after
+        # like @Name! or @Name? or @Name.
+        # The negative lookahead (?!\s*\() ensures we don't replace if it's already in Name(ID) format
+        
+        # Escaped name for regex
+        esc_name = re.escape(name)
+        
+        # Pattern:
+        # @?       - Optional @ prefix (we want to match "Name" or "@Name")
+        # {esc_name} - The name itself
+        # (?!\s*\() - Negative lookahead: NOT followed by optional space and opening paren (ID)
+        # (?=[^a-zA-Z0-9_]|$) - Positive lookahead: Followed by non-word char or end of string (ensures we don't match partial names like "Rob" in "Robert")
+        
+        pattern = re.compile(rf"@?{esc_name}(?!\s*\()(?=[^a-zA-Z0-9_]|$)", re.IGNORECASE)
+        
+        # Replace with <@ID>
         response = pattern.sub(f"<@{uid}>", response)
         
     return response
@@ -419,7 +433,22 @@ def setup_chat(bot):
             # Request 500 messages (current message will be excluded and added separately)
             logger = logging.getLogger(__name__)
             logger.info(f"[chatbot] Building context for channel {message.channel.id}, user {message.author.id}")
-            prompt = await build_context_prompt(message, raw_prompt, limit=500)
+            
+            # Check for reply reference
+            reply_to_message = None
+            if message.reference and message.reference.resolved:
+                if isinstance(message.reference.resolved, type(message)):
+                    reply_to_message = message.reference.resolved
+                    logger.info(f"[chatbot] Found reply context: {reply_to_message.id}")
+            elif message.reference and message.reference.message_id:
+                # Try to fetch if not resolved (e.g. not in cache)
+                try:
+                    reply_to_message = await message.channel.fetch_message(message.reference.message_id)
+                    logger.info(f"[chatbot] Fetched reply context: {reply_to_message.id}")
+                except Exception as e:
+                    logger.warning(f"[chatbot] Failed to fetch reply context: {e}")
+
+            prompt = await build_context_prompt(message, raw_prompt, limit=500, reply_to_message=reply_to_message)
             logger.info(f"[chatbot] Context prompt built, length: {len(prompt)} characters")
 
             # Step 3: run the agent (shared session per channel)
