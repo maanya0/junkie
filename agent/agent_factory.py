@@ -141,7 +141,6 @@ def create_team_for_user(user_id: str):
     code_agent = Agent(
         name="Code Agent",
         model=model,
-        max_tokens=4096,
         tools=[
             e2b_toolkit,
             CalculatorTools(),
