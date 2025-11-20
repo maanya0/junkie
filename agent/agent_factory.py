@@ -131,7 +131,7 @@ def create_team_for_user(user_id: str):
     compound_agent = Agent(
         id="groq-comound",
         name="Groq Compound",
-        role = "Fast and accurate code execution with access to real-time data"
+        role = "Fast and accurate code execution with access to real-time data",
         model=OpenAILike(
             id="groq/compound",
             max_tokens=8000,
