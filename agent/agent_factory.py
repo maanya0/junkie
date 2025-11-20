@@ -50,7 +50,7 @@ def create_model(user_id: str):
     
     if PROVIDER == "groq":
         return OpenAILike(
-            id=MODEL_NAME,
+            id="groq/compound",
             max_tokens=4096,
             temperature=MODEL_TEMPERATURE,
             top_p=MODEL_TOP_P,
@@ -142,7 +142,11 @@ def create_team_for_user(user_id: str):
     # 2. Code agent (Sandbox execution & calculator)
     code_agent = Agent(
         name="Code Agent",
-        model=model,
+        OpenAILike(
+            id="groq/compound",
+            max_tokens=8000,
+            base_url="https://api.groq.com/openai/v1",
+            api_key=GROQ_API_KEY),
         tools=[
             e2b_toolkit,
             CalculatorTools(),
