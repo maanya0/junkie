@@ -54,14 +54,8 @@ def create_model(user_id: str):
             max_tokens=4096,
             temperature=MODEL_TEMPERATURE,
             top_p=MODEL_TOP_P,
-            base_url="https://api.supermemory.ai/v3/https://api.groq.com/openai/v1",
+            base_url="https://api.groq.com/openai/v1",
             api_key=GROQ_API_KEY,
-            client_params={
-                "default_headers": {
-                    "x-supermemory-api-key": SUPERMEMORY_KEY,
-                    "x-sm-user-id": user_id
-                }
-            }
         )
 
     # Custom provider
@@ -107,12 +101,6 @@ def create_team_for_user(user_id: str):
         top_p=MODEL_TOP_P,
         base_url=PROVIDER,
         api_key=CUSTOM_PROVIDER_API_KEY,
-        client_params={
-            "default_headers": {
-                "x-supermemory-api-key": SUPERMEMORY_KEY,
-                "x-sm-user-id": user_id
-            }
-        }
     ),
         tools=[
             ExaTools(), 
@@ -140,8 +128,10 @@ def create_team_for_user(user_id: str):
     )
 
     # 2. Code agent (Sandbox execution & calculator)
-    code_agent = Agent(
-        name="Code Agent",
+    compound_agent = Agent(
+        id="groq-comound",
+        name="Groq Compound",
+        role = "Fast and accurate code execution with access to real-time data"
         model=OpenAILike(
             id="groq/compound",
             max_tokens=8000,
@@ -164,9 +154,9 @@ def create_team_for_user(user_id: str):
             timezone_identifier="Asia/Kolkata",
             instructions="You specialize in handling MCP-based tool interactions."
         )
-        agents = [perplexity_agent, code_agent, mcp_agent]
+        agents = [perplexity_agent, compound_agent, mcp_agent]
     else:
-        agents = [perplexity_agent, code_agent]
+        agents = [perplexity_agent, compound_agent]
 
     # ---------------------------------------------------------
     # Team Leader (Orchestrator)
