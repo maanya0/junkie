@@ -1,7 +1,9 @@
+# chat_handler.py
 import logging
 import sys
 from discord_bot.discord_utils import resolve_mentions, restore_mentions, correct_mentions
-from agent.agent_factory import get_or_create_agent, create_model_and_agent
+# NOTE: updated imports to use team factory functions
+from agent.agent_factory import get_or_create_team, create_team_for_user
 from tools.tools_factory import setup_mcp, get_mcp_tools, MultiMCPTools
 from discord_bot.context_cache import (
     build_context_prompt,
@@ -14,11 +16,13 @@ logger = logging.getLogger(__name__)
 
 async def async_ask_junkie(user_text: str, user_id: str, session_id: str) -> str:
     """
-    Run the agent with improved error handling and response validation.
+    Run the user's Team with improved error handling and response validation.
     """
-    agent = get_or_create_agent(user_id)
+    # get_or_create_team returns a Team instance (or equivalent orchestrator)
+    team = get_or_create_team(user_id)
     try:
-        result = await agent.arun(
+        # Teams should implement async arun similar to Agents
+        result = await team.arun(
             input=user_text, user_id=user_id, session_id=session_id
         )
         
@@ -32,12 +36,14 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str) -> str
         return content
     except Exception as e:
         # Log the error for debugging
-        logger.error(f"Agent error for user {user_id}: {e}", exc_info=True)
+        logger.error(f"Team error for user {user_id}: {e}", exc_info=True)
         raise  # Re-raise to be handled by caller
+
 
 def setup_chat(bot):
     @bot.event
     async def on_ready():
+        # Ensure MCP tools are connected/initialized
         await setup_mcp()
 
     @bot.event
@@ -45,15 +51,15 @@ def setup_chat(bot):
         # Update cache with new message (both user and bot messages for full context)
         await append_message_to_cache(message)
         
-        # Check for command prefix (.) - let commands be processed by bot
+        # Allow normal bot commands to be handled by discord.py
         if message.content.startswith(bot.prefix):
             await bot.bot.process_commands(message)
             return
 
-        # Check for chatbot prefix (!) - process as chatbot message
+        # Chatbot prefix (!) — handle via Team
         chatbot_prefix = "!"
         if message.content.startswith(chatbot_prefix):
-            # Step 1: replace mentions with readable form
+            # Step 1: replace mentions with readable form for context
             processed_content = resolve_mentions(message)
             
             # Extract the prompt after the prefix
@@ -62,17 +68,15 @@ def setup_chat(bot):
                 return
 
             # Step 2: build context-aware prompt
-            # Request 500 messages (current message will be excluded and added separately)
             logger.info(f"[chatbot] Building context for channel {message.channel.id}, user {message.author.id}")
             
-            # Check for reply reference
+            # Try to find reply context if present
             reply_to_message = None
             if message.reference and message.reference.resolved:
                 if isinstance(message.reference.resolved, type(message)):
                     reply_to_message = message.reference.resolved
                     logger.info(f"[chatbot] Found reply context: {reply_to_message.id}")
             elif message.reference and message.reference.message_id:
-                # Try to fetch if not resolved (e.g. not in cache)
                 try:
                     reply_to_message = await message.channel.fetch_message(message.reference.message_id)
                     logger.info(f"[chatbot] Fetched reply context: {reply_to_message.id}")
@@ -82,7 +86,7 @@ def setup_chat(bot):
             prompt = await build_context_prompt(message, raw_prompt, limit=500, reply_to_message=reply_to_message)
             logger.info(f"[chatbot] Context prompt built, length: {len(prompt)} characters")
 
-            # Step 3: run the agent (shared session per channel)
+            # Step 3: run the Team (shared session per channel)
             async with message.channel.typing():
                 user_id = str(message.author.id)
                 session_id = str(message.channel.id)
@@ -91,20 +95,21 @@ def setup_chat(bot):
                         prompt, user_id=user_id, session_id=session_id
                     )
                 except Exception as e:
+                    # Surface a truncated error to the user; keep details in logs
+                    logger.exception(f"[chatbot] Failed to generate reply for user {user_id}")
                     await message.channel.send(
                         f"**Error:** Failed to process request: {str(e)[:500]}"
                     )
                     return
 
-            # Step 4: convert '@Name(id)' → actual mentions
+            # Step 4: restore mentions in the reply
             final_reply = restore_mentions(reply, message.guild)
-            #replace **🗿 hero:** if the agent provides it iin its response
+            # Remove any agent-supplied prefix artifacts
             final_reply = final_reply.replace("**🗿 hero:**", "")
-            #replace only @name with mentions
+            # Replace any leftover plain @name with actual mentions
             final_reply = correct_mentions(prompt, final_reply)
             
-
-            # Step 5: send reply, splitting long ones (Discord limit is 2000 chars)
+            # Step 5: send reply, chunking long outputs (Discord limit is ~2000 chars)
             chunk_size = 1900
             for chunk in [final_reply[i:i+chunk_size] for i in range(0, len(final_reply), chunk_size)]:
                 await message.channel.send(f"**🗿 hero:**\n{chunk}")
@@ -119,19 +124,35 @@ def setup_chat(bot):
         """Handle message deletions to update cache."""
         await delete_message_from_cache(message)
 
+
 async def main_cli():
+    """
+    CLI entrypoint — create a per-user Team and run its CLI app if available.
+    """
     await setup_mcp()
     try:
         if sys.stdin and sys.stdin.isatty():
-            # For CLI, use a default user_id
-            _, cli_agent = create_model_and_agent("cli_user")
-            await cli_agent.acli_app()
+            # Create a team for a default CLI user and run interactive CLI if Team exposes it
+            _, cli_team = create_team_for_user("cli_user")
+            # many agent/team implementations expose acli_app similar to agents;
+            # fall back gracefully if not present
+            if hasattr(cli_team, "acli_app"):
+                await cli_team.acli_app()
+            else:
+                print("CLI app not available for Team object.")
         else:
             print("Non-interactive environment detected; skipping CLI app.")
     finally:
+        # Attempt to gracefully close MCP tools if available
         mcp = get_mcp_tools()
-        if mcp and isinstance(mcp, MultiMCPTools) and _mcp_connected:
+        if mcp:
             try:
-                await mcp.close()
+                # If close is async, await it; otherwise, call it
+                close_call = getattr(mcp, "close", None)
+                if close_call:
+                    if hasattr(close_call, "__await__"):
+                        await close_call()
+                    else:
+                        close_call()
             except Exception:
-                pass
+                logger.exception("Error closing MCP tools, ignoring.")
