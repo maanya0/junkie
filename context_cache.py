@@ -1,15 +1,15 @@
 # context_cache.py
 """
 Efficient Discord message caching and context building for chatbot.py
+Optimized for low latency using local memory (deque).
 """
 
 import os
-import json
 import time
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional
-import redis.asyncio as redis
+from typing import List, Optional, Dict, Deque
+from collections import deque
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,76 +17,52 @@ load_dotenv()
 # Logger
 logger = logging.getLogger(__name__)
 
-# Redis client (shared, with connection pooling)
-_redis_client: Optional[redis.Redis] = None
-_redis_enabled = os.getenv("USE_REDIS", "false").lower() == "true"
+# ──────────────────────────────────────────────
+# Configuration & In-Memory Cache
+# ──────────────────────────────────────────────
 
-def get_redis_client():
-    """Get or create Redis client singleton."""
-    global _redis_client
-    if _redis_client is None and _redis_enabled:
-        try:
-            _redis_client = redis.from_url(
-                os.getenv("REDIS_URL", "redis://localhost:6379/0"),
-                decode_responses=False,  # We handle JSON ourselves
-                socket_connect_timeout=2,
-                socket_timeout=2,
-            )
-        except Exception as e:
-            logger.warning(f"Redis connection failed: {e}, using in-memory cache only")
-            _redis_client = None
-    return _redis_client
-
-# In-memory cache (fallback)
-_memory_cache = {}
+# Cache configuration
 CACHE_TTL = int(os.getenv("CACHE_TTL", "120"))  # seconds
+MAX_MESSAGES_IN_CACHE = int(os.getenv("MAX_MESSAGES_IN_CACHE", "500"))
 
-# Redis size limits (to prevent "max request size exceeded" errors)
-# Default: 10MB per command (10 * 1024 * 1024 bytes) - safe limit for most Redis instances
-# We'll chunk data across multiple commands if it exceeds this
-MAX_REDIS_CHUNK_SIZE = int(os.getenv("MAX_REDIS_CHUNK_SIZE", str(10 * 1024 * 1024)))  # bytes per chunk
-MAX_MESSAGES_IN_CACHE = int(os.getenv("MAX_MESSAGES_IN_CACHE", "500"))  # Can be higher now with chunking
+# In-memory cache structure:
+# { channel_id: {"data": deque(maxlen=MAX_MESSAGES_IN_CACHE), "timestamp": float} }
+_memory_cache: Dict[int, Dict] = {}
 
-# Timezone configuration (Discord uses UTC, but we can display in a specific timezone)
-# Default to Asia/Kolkata (IST - Indian Standard Time), but can be configured via DISCORD_TIMEZONE env var
+# Timezone configuration
 try:
     import pytz
     _timezone_str = os.getenv("DISCORD_TIMEZONE", "Asia/Kolkata")
     _timezone = pytz.timezone(_timezone_str)
     _has_pytz = True
 except ImportError:
-    # Fallback: IST is UTC+5:30, but without pytz we can't do proper timezone conversion
     _timezone_str = "UTC"
     _timezone = timezone.utc
     _has_pytz = False
-    logger.warning("pytz not installed, using UTC. Install pytz for timezone support (required for IST).")
+    logger.warning("pytz not installed, using UTC. Install pytz for timezone support.")
 
 
 def format_message_timestamp(message_created_at, current_time: datetime) -> str:
     """
     Format message timestamp with relative time indication.
-    Returns formatted string like "[2h ago]" or "[Dec 15, 14:30]" for older messages.
     """
     if not message_created_at:
         return ""
     
-    # Ensure both are timezone-aware
     if message_created_at.tzinfo is None:
         message_created_at = message_created_at.replace(tzinfo=timezone.utc)
     if current_time.tzinfo is None:
         current_time = current_time.replace(tzinfo=timezone.utc)
     
-    # Convert to configured timezone if pytz is available
     if _has_pytz and _timezone != timezone.utc:
         try:
             message_created_at = message_created_at.astimezone(_timezone)
             current_time = current_time.astimezone(_timezone)
         except Exception:
-            pass  # Fallback to UTC
+            pass
     
     time_diff = current_time - message_created_at
     
-    # Relative time formatting
     if time_diff < timedelta(minutes=1):
         return "[just now]"
     elif time_diff < timedelta(hours=1):
@@ -99,189 +75,7 @@ def format_message_timestamp(message_created_at, current_time: datetime) -> str:
         days = time_diff.days
         return f"[{days}d ago]"
     else:
-        # For older messages, show date and time
         return f"[{message_created_at.strftime('%b %d, %H:%M')}]"
-
-
-# ──────────────────────────────────────────────
-# Redis Chunking Management
-# ──────────────────────────────────────────────
-
-def _chunk_data(data: List[str], max_chunk_size_bytes: int) -> List[List[str]]:
-    """
-    Split data into chunks where each chunk's JSON representation fits within max_chunk_size_bytes.
-    Returns a list of chunks.
-    """
-    if not data:
-        return []
-    
-    chunks = []
-    current_chunk = []
-    
-    for item in data:
-        # Test if adding this item would exceed the limit
-        test_chunk = current_chunk + [item]
-        test_json = json.dumps(test_chunk)
-        test_size = len(test_json.encode('utf-8'))
-        
-        # Check if adding this item would exceed the limit
-        if current_chunk and test_size > max_chunk_size_bytes:
-            # Current chunk is full, save it and start a new one
-            chunks.append(current_chunk)
-            current_chunk = [item]
-        else:
-            # Add to current chunk
-            current_chunk.append(item)
-    
-    # Add the last chunk if it has data
-    if current_chunk:
-        chunks.append(current_chunk)
-    
-    return chunks
-
-
-async def _chunked_redis_set(redis_client, base_key: str, data: List[str], ttl: int):
-    """
-    Store data in Redis using chunking if needed. Data is split across multiple keys
-    if it exceeds MAX_REDIS_CHUNK_SIZE.
-    
-    Keys format:
-    - Single chunk: `base_key` (for backward compatibility)
-    - Multiple chunks: `base_key:chunk:0`, `base_key:chunk:1`, etc.
-    - Metadata: `base_key:meta` (stores chunk count)
-    """
-    if not data:
-        # Delete all chunks if data is empty
-        await _chunked_redis_delete(redis_client, base_key)
-        return True
-    
-    # Check if data fits in a single chunk
-    json_str = json.dumps(data)
-    size_bytes = len(json_str.encode('utf-8'))
-    
-    if size_bytes <= MAX_REDIS_CHUNK_SIZE:
-        # Single chunk - use the base key for backward compatibility
-        try:
-            # Clean up any old chunked data
-            await _chunked_redis_delete(redis_client, base_key, keep_base=False)
-            await redis_client.set(base_key, json_str, ex=ttl)
-            return True
-        except Exception as e:
-            error_msg = str(e).lower()
-            if "max request size" in error_msg or "command too large" in error_msg:
-                # Fall through to chunking
-                logger.debug(f"Single chunk too large, falling back to chunking: {e}")
-            else:
-                logger.debug(f"Failed to set Redis key {base_key}: {e}")
-                return False
-    
-    # Need to chunk the data
-    chunks = _chunk_data(data, MAX_REDIS_CHUNK_SIZE)
-    
-    if not chunks:
-        return False
-    
-    try:
-        # Delete old chunks first
-        await _chunked_redis_delete(redis_client, base_key, keep_base=True)
-        
-        # Store each chunk
-        for i, chunk in enumerate(chunks):
-            chunk_key = f"{base_key}:chunk:{i}"
-            chunk_json = json.dumps(chunk)
-            await redis_client.set(chunk_key, chunk_json, ex=ttl)
-        
-        # Store metadata (chunk count)
-        meta_key = f"{base_key}:meta"
-        meta_data = {"chunks": len(chunks), "total_messages": len(data)}
-        await redis_client.set(meta_key, json.dumps(meta_data), ex=ttl)
-        
-        logger.debug(f"Stored {len(data)} messages in {len(chunks)} chunks for key {base_key}")
-        return True
-    except Exception as e:
-        error_msg = str(e).lower()
-        if "max request size" in error_msg or "command too large" in error_msg:
-            logger.error(
-                f"Redis chunk still too large for key {base_key}: {e}. "
-                f"Consider reducing MAX_REDIS_CHUNK_SIZE."
-            )
-        else:
-            logger.debug(f"Failed to set chunked Redis data for key {base_key}: {e}")
-        return False
-
-
-async def _chunked_redis_get(redis_client, base_key: str) -> Optional[List[str]]:
-    """
-    Retrieve data from Redis, handling both single-key and chunked storage.
-    Returns None if data doesn't exist or can't be retrieved.
-    """
-    try:
-        # First, try to get as single key (backward compatibility)
-        single_data = await redis_client.get(base_key)
-        if single_data:
-            return json.loads(single_data)
-        
-        # Check for chunked data
-        meta_key = f"{base_key}:meta"
-        meta_data = await redis_client.get(meta_key)
-        
-        if not meta_data:
-            return None
-        
-        meta = json.loads(meta_data)
-        num_chunks = meta.get("chunks", 0)
-        
-        if num_chunks == 0:
-            return None
-        
-        # Fetch all chunks
-        chunks = []
-        for i in range(num_chunks):
-            chunk_key = f"{base_key}:chunk:{i}"
-            chunk_data = await redis_client.get(chunk_key)
-            if chunk_data:
-                chunks.append(json.loads(chunk_data))
-            else:
-                logger.warning(f"Missing chunk {i} for key {base_key}")
-                return None  # Incomplete data
-        
-        # Combine all chunks
-        combined = []
-        for chunk in chunks:
-            combined.extend(chunk)
-        
-        return combined
-    except (json.JSONDecodeError, Exception) as e:
-        logger.debug(f"Failed to get chunked Redis data for key {base_key}: {e}")
-        return None
-
-
-async def _chunked_redis_delete(redis_client, base_key: str, keep_base: bool = False):
-    """
-    Delete all chunks and metadata for a key. If keep_base is True, don't delete the base key.
-    """
-    try:
-        # Delete base key if not keeping it
-        if not keep_base:
-            await redis_client.delete(base_key)
-        
-        # Delete metadata to get chunk count
-        meta_key = f"{base_key}:meta"
-        meta_data = await redis_client.get(meta_key)
-        
-        if meta_data:
-            meta = json.loads(meta_data)
-            num_chunks = meta.get("chunks", 0)
-            
-            # Delete all chunks
-            chunk_keys = [f"{base_key}:chunk:{i}" for i in range(num_chunks)]
-            if chunk_keys:
-                await redis_client.delete(*chunk_keys)
-            
-            # Delete metadata
-            await redis_client.delete(meta_key)
-    except Exception as e:
-        logger.debug(f"Failed to delete chunked Redis data for key {base_key}: {e}")
 
 
 # ──────────────────────────────────────────────
@@ -290,144 +84,61 @@ async def _chunked_redis_delete(redis_client, base_key: str, keep_base: bool = F
 
 async def get_recent_context(channel, limit: int = 500, before_message=None) -> List[str]:
     """
-    Get up to `limit` most recent messages from a Discord channel.
-    Uses layered caching: in-memory → Redis → Discord API.
-
-    Args:
-        channel: Discord channel object
-        limit: Maximum number of messages to fetch (no capping - chunking handles large sizes)
-        before_message: Optional message object - if provided, fetch messages before this message
-
-    Returns:
-        list[str]: formatted messages like "User(ID): message"
+    Get recent messages from cache or Discord API.
     """
-    # Don't cap the limit - allow fetching up to the requested amount
-    # The chunking system will handle large data sizes
-    effective_limit = limit
-    
     now = time.time()
     channel_id = channel.id
     mem_entry = _memory_cache.get(channel_id)
 
-    logger.info(f"[get_recent_context] Requested {limit} messages for channel {channel_id}, before_message={before_message.id if before_message else None}")
-
-    # 1. In-memory cache hit
-    # Only use cache if we're not fetching before a specific message (which means we need fresh data)
+    # 1. Cache Hit
     if mem_entry and now - mem_entry["timestamp"] < CACHE_TTL and before_message is None:
-        cached_count = len(mem_entry["data"])
-        logger.info(f"[get_recent_context] In-memory cache hit: {cached_count} messages available")
-        # Return up to requested limit
-        if cached_count > limit:
-            result = mem_entry["data"][-limit:]
-            logger.info(f"[get_recent_context] Returning last {len(result)} messages from cache (requested {limit})")
-            return result
-        logger.info(f"[get_recent_context] Returning all {cached_count} messages from cache")
-        return mem_entry["data"].copy()  # Return copy to prevent mutation
+        # Convert deque to list for slicing
+        cached_data = list(mem_entry["data"])
+        if len(cached_data) > limit:
+            return cached_data[-limit:]
+        return cached_data
 
-    # 2. Redis cache hit
-    # Only use cache if we're not fetching before a specific message (which means we need fresh data)
-    redis_key = f"context:{channel_id}"
-    redis_client = get_redis_client()
-    if redis_client and before_message is None:
-        try:
-            data = await _chunked_redis_get(redis_client, redis_key)
-            if data:
-                redis_count = len(data)
-                logger.info(f"[get_recent_context] Redis cache hit: {redis_count} messages available")
-                # Return up to requested limit (don't cap at MAX_MESSAGES_IN_CACHE)
-                if redis_count > limit:
-                    data = data[-limit:]
-                    logger.info(f"[get_recent_context] Returning last {len(data)} messages from Redis (requested {limit})")
-                else:
-                    logger.info(f"[get_recent_context] Returning all {redis_count} messages from Redis")
-                _memory_cache[channel_id] = {"data": data, "timestamp": now}
-                return data.copy()
-        except Exception as e:
-            logger.debug(f"[get_recent_context] Redis cache miss or error for {channel_id}: {e}")
-
-    # 3. Fetch from Discord API
-    # If before_message is provided, fetch messages BEFORE that message (excludes the current message)
-    # Otherwise, fetch the most recent messages
-    if before_message:
-        logger.info(f"[get_recent_context] Fetching {effective_limit} messages BEFORE message {before_message.id} from Discord API")
-    else:
-        logger.info(f"[get_recent_context] Fetching {effective_limit} messages from Discord API for channel {channel_id}")
+    # 2. Fetch from Discord API
+    logger.info(f"[get_recent_context] Fetching messages for channel {channel_id}")
     
     try:
         messages = []
         current_time = datetime.now(timezone.utc)
-        fetched_count = 0
         
-        # Fetch messages before the specified message if provided, otherwise fetch most recent
-        # We fetch more than the limit to account for messages that might be filtered out (empty content, embeds-only, etc.)
-        # discord.py handles pagination internally, so we can request more than 100
-        # Fetch 50% more to account for filtering (e.g., 750 for 500 target)
-        fetch_limit = int(effective_limit * 1.5)
-        max_discord_limit = 100  # Discord API limit per request, but discord.py handles pagination
+        # Fetch 50% more to account for filtering
+        fetch_limit = int(limit * 1.5)
         
         if before_message:
-            # Fetch messages, continuing until we have enough with content
             async for m in channel.history(limit=fetch_limit, before=before_message):
-                fetched_count += 1
-                # Include all messages (both user and bot) for full context
-                # Only filter out completely empty messages (no content at all)
                 if m.content and m.content.strip():
                     messages.append(m)
-                    # Stop once we have enough messages with content
-                    if len(messages) >= effective_limit:
+                    if len(messages) >= limit:
                         break
         else:
-            # Fetch messages, continuing until we have enough with content
             async for m in channel.history(limit=fetch_limit):
-                fetched_count += 1
-                # Include all messages (both user and bot) for full context
-                # Only filter out completely empty messages (no content at all)
                 if m.content and m.content.strip():
                     messages.append(m)
-                    # Stop once we have enough messages with content
-                    if len(messages) >= effective_limit:
+                    if len(messages) >= limit:
                         break
         
-        logger.info(
-            f"[get_recent_context] Fetched {fetched_count} total messages from Discord, "
-            f"{len(messages)} have content (target: {effective_limit}, "
-            f"filtered out: {fetched_count - len(messages)})"
-        )
-        
-        if len(messages) < effective_limit:
-            logger.warning(
-                f"[get_recent_context] Only got {len(messages)} messages with content "
-                f"(requested {effective_limit}). This may be because: "
-                f"1) Channel has fewer than {effective_limit} messages with content, "
-                f"2) Many messages were filtered out (embeds-only, system messages, etc.)"
-            )
-        
-        messages.reverse()  # chronological order (oldest → newest)
+        messages.reverse()  # chronological order
 
-        formatted = []
+        formatted = deque(maxlen=MAX_MESSAGES_IN_CACHE)
         for m in messages:
             timestamp_str = format_message_timestamp(m.created_at, current_time)
             formatted.append(
                 f"{timestamp_str} {m.author.display_name}({m.author.id}): {m.clean_content}"
             )
 
-        logger.info(f"[get_recent_context] Formatted {len(formatted)} messages for channel {channel_id}")
-
-        # Cache results (in-memory always, Redis with chunking if needed)
+        # Update Cache
         _memory_cache[channel_id] = {"data": formatted, "timestamp": now}
-        if redis_client:
-            await _chunked_redis_set(redis_client, redis_key, formatted, CACHE_TTL)
-            logger.info(f"[get_recent_context] Cached {len(formatted)} messages in Redis")
-
-        return formatted
+        
+        return list(formatted)
+        
     except Exception as e:
-        logger.error(f"[get_recent_context] Failed to fetch messages from channel {channel_id}: {e}", exc_info=True)
-        # Return cached data if available, even if expired
+        logger.error(f"[get_recent_context] Error: {e}", exc_info=True)
         if mem_entry:
-            cached_count = len(mem_entry["data"])
-            logger.warning(f"[get_recent_context] Returning expired cache with {cached_count} messages")
-            return mem_entry["data"].copy()
-        logger.warning(f"[get_recent_context] No messages available for channel {channel_id}")
+            return list(mem_entry["data"])
         return []
 
 
@@ -437,245 +148,132 @@ async def get_recent_context(channel, limit: int = 500, before_message=None) -> 
 
 async def build_context_prompt(message, raw_prompt: str, limit: int = None):
     """
-    Build a model-ready text prompt with up to `limit` recent messages.
-    Excludes the current message from context (it will be added separately).
-    Includes current date/time for temporal awareness.
-
-    This version also injects channel metadata (channel id, name, guild id/name,
-    and channel type) at the top so the model always knows which channel the
-    conversation came from.
+    Build a model-ready text prompt.
     """
-    # Use MAX_MESSAGES_IN_CACHE as default if limit not specified
     if limit is None:
         limit = MAX_MESSAGES_IN_CACHE
 
     user_label = f"{message.author.display_name}({message.author.id})"
-
-    logger.info(f"[build_context_prompt] Building prompt with limit={limit} for channel {message.channel.id}")
-
-    # Fetch messages BEFORE the current message to get the previous 'limit' messages
-    logger.info(f"[build_context_prompt] Fetching {limit} messages BEFORE current message {message.id}")
     context_lines = await get_recent_context(message.channel, limit=limit, before_message=message)
 
-    logger.info(f"[build_context_prompt] Received {len(context_lines)} messages from get_recent_context (target: {limit})")
-
-    # Trim or warn as before
+    # Trim if needed
     if len(context_lines) > limit:
         context_lines = context_lines[-limit:]
-        logger.info(f"[build_context_prompt] Trimmed to last {limit} messages")
-    elif len(context_lines) < limit:
-        logger.warning(f"[build_context_prompt] Only {len(context_lines)} messages available (requested {limit})")
 
-    logger.info(f"[build_context_prompt] Final context has {len(context_lines)} messages (target: {limit})")
-
-    # Channel / guild metadata (safe guard for DMs / missing attrs)
+    # Metadata
     try:
-        channel_id = getattr(message.channel, "id", "unknown")
         channel_name = getattr(message.channel, "name", "DM")
-    except Exception:
-        channel_id = "unknown"
-        channel_name = "unknown"
-
-    try:
-        guild_id = getattr(message.guild, "id", "DM")
         guild_name = getattr(message.guild, "name", "DM")
     except Exception:
-        guild_id = "DM"
+        channel_name = "unknown"
         guild_name = "DM"
 
-    # channel type if available (discord.py enums)
-    try:
-        ch_type = getattr(message.channel, "type", None)
-        # If it's an enum, convert to string name, else str()
-        channel_type = ch_type.name if hasattr(ch_type, "name") else str(ch_type)
-    except Exception:
-        channel_type = "unknown"
-
     channel_meta = (
-        f"Channel ID: {channel_id}\n"
-        f"Channel Name: {channel_name}\n"
-        f"Channel Type: {channel_type}\n"
-        f"Guild ID: {guild_id}\n"
-        f"Guild Name: {guild_name}\n"
+        f"Channel: {channel_name}\n"
+        f"Guild: {guild_name}\n"
         "----\n"
     )
 
-    # Get current date/time with timezone
+    # Time
     now = datetime.now(timezone.utc)
     if _has_pytz and _timezone != timezone.utc:
         try:
             now = now.astimezone(_timezone)
         except Exception:
             pass
+            
+    current_time_str = now.strftime("%Y-%m-%d %H:%M:%S %Z")
+    message_timestamp = format_message_timestamp(message.created_at, now) or "[now]"
 
-    # Format current time with proper timezone display
-    if _has_pytz:
-        try:
-            tz_abbr = now.strftime("%Z") or _timezone_str
-        except Exception:
-            tz_abbr = "IST" if "Kolkata" in _timezone_str else _timezone_str
-        current_time_str = now.strftime("%Y-%m-%d %H:%M:%S %Z")
-        timezone_name = f"{tz_abbr} (Asia/Kolkata, UTC+5:30)" if "Kolkata" in _timezone_str else _timezone_str
-    else:
-        current_time_str = now.strftime("%Y-%m-%d %H:%M:%S UTC")
-        timezone_name = "UTC (pytz not installed - install pytz for IST support)"
-
-    # Format message timestamp
-    message_timestamp = format_message_timestamp(message.created_at, now)
-    if not message_timestamp:
-        message_timestamp = "[now]"
-
-    # Build prompt: metadata first so model sees it at the start
     prompt = (
         f"{channel_meta}"
-        f"Current Date/Time: {current_time_str} ({timezone_name})\n"
-        f"Timezone: Indian Standard Time (IST) - Asia/Kolkata (UTC+5:30)\n"
-        f"All message timestamps are relative to this current time and displayed in IST.\n\n"
-        f"Here is the recent Discord conversation (messages are in chronological order, oldest to newest):\n"
+        f"Current Time: {current_time_str}\n"
+        f"Timestamps are relative to this time.\n\n"
+        f"Conversation History:\n"
         + "\n".join(context_lines)
         + f"\n\n{message_timestamp} {user_label} says: {raw_prompt}\n\n"
-        f"IMPORTANT: The message above is the CURRENT message you need to respond to. "
-        f"All previous messages in the conversation are from the PAST. "
-        f"Pay attention to timestamps to understand when things happened relative to now. "
-        f"All times are in IST (Indian Standard Time, UTC+5:30)."
+        f"IMPORTANT: The message above is the CURRENT message."
     )
     return prompt
 
 
 # ──────────────────────────────────────────────
-# Cache Updates for Edits / Deletes
+# Cache Updates
 # ──────────────────────────────────────────────
 
 async def append_message_to_cache(message):
     """
-    Append a new message to the cache if it exists.
-    This is more efficient than refetching all messages.
-    Includes both user and bot messages for full conversation context.
+    Append a new message to the in-memory deque.
     """
-    channel_id = message.channel.id
     if not message.content.strip():
         return
-    
-    # Format with timestamp
+
+    channel_id = message.channel.id
     current_time = datetime.now(timezone.utc)
     timestamp_str = format_message_timestamp(message.created_at, current_time)
     new_line = f"{timestamp_str} {message.author.display_name}({message.author.id}): {message.clean_content}"
     
     mem_entry = _memory_cache.get(channel_id)
-    redis_key = f"context:{channel_id}"
-    redis_client = get_redis_client()
     
-    # Get existing data from memory or Redis
-    existing_data = None
     if mem_entry:
-        existing_data = mem_entry["data"]
-    elif redis_client:
-        # Try to load from Redis if memory cache doesn't exist
-        try:
-            existing_data = await _chunked_redis_get(redis_client, redis_key)
-        except Exception as e:
-            logger.debug(f"Failed to load from Redis for append: {e}")
-    
-    # If no cache exists, just create a new one with this message
-    if existing_data is None:
-        updated_data = [new_line]
+        mem_entry["data"].append(new_line)
+        mem_entry["timestamp"] = time.time()
     else:
-        updated_data = existing_data + [new_line]
-    
-    # Keep only last N messages to prevent unbounded growth
-    if len(updated_data) > MAX_MESSAGES_IN_CACHE:
-        updated_data = updated_data[-MAX_MESSAGES_IN_CACHE:]
-    
-    # Update both caches
-    _memory_cache[channel_id] = {"data": updated_data, "timestamp": time.time()}
-    
-    if redis_client:
-        await _chunked_redis_set(redis_client, redis_key, updated_data, CACHE_TTL)
+        # Initialize new cache entry
+        d = deque(maxlen=MAX_MESSAGES_IN_CACHE)
+        d.append(new_line)
+        _memory_cache[channel_id] = {"data": d, "timestamp": time.time()}
 
 
 async def update_message_in_cache(before, after):
     """
-    Update a message in both caches if it's edited.
+    Update a message in the cache.
     """
     channel_id = before.channel.id
     mem_entry = _memory_cache.get(channel_id)
     if not mem_entry:
         return
 
-    updated = []
-    replaced = False
     current_time = datetime.now(timezone.utc)
     timestamp_str = format_message_timestamp(before.created_at, current_time)
     
-    # Match with or without timestamp (for backward compatibility)
-    old_line_no_ts = f"{before.author.display_name}({before.author.id}): {before.clean_content}"
-    old_line_with_ts = f"{timestamp_str} {old_line_no_ts}"
+    # We need to reconstruct the deque to update an item in the middle
+    # This is O(N) but N is small (MAX_MESSAGES_IN_CACHE)
+    old_data = mem_entry["data"]
+    new_data = deque(maxlen=MAX_MESSAGES_IN_CACHE)
+    
     new_line = f"{timestamp_str} {after.author.display_name}({after.author.id}): {after.clean_content}"
-
-    for line in mem_entry["data"]:
-        # Check both with and without timestamp for backward compatibility
-        if line == old_line_with_ts or line == old_line_no_ts or line.endswith(before.clean_content):
-            updated.append(new_line)
-            replaced = True
+    
+    for line in old_data:
+        if line.endswith(before.clean_content):
+            new_data.append(new_line)
         else:
-            updated.append(line)
-
-    if replaced:
-        # Cap to MAX_MESSAGES_IN_CACHE
-        if len(updated) > MAX_MESSAGES_IN_CACHE:
-            updated = updated[-MAX_MESSAGES_IN_CACHE:]
-        
-        _memory_cache[channel_id] = {"data": updated, "timestamp": time.time()}
-        redis_key = f"context:{channel_id}"
-        redis_client = get_redis_client()
-        if redis_client:
-            await _chunked_redis_set(redis_client, redis_key, updated, CACHE_TTL)
+            new_data.append(line)
+            
+    mem_entry["data"] = new_data
+    mem_entry["timestamp"] = time.time()
 
 
 async def delete_message_from_cache(message):
     """
-    Remove a deleted message from both caches.
+    Remove a message from the cache.
     """
     channel_id = message.channel.id
     mem_entry = _memory_cache.get(channel_id)
     if not mem_entry:
         return
 
-    # Match with or without timestamp
-    target_line_no_ts = f"{message.author.display_name}({message.author.id}): {message.clean_content}"
-    current_time = datetime.now(timezone.utc)
-    timestamp_str = format_message_timestamp(message.created_at, current_time)
-    target_line_with_ts = f"{timestamp_str} {target_line_no_ts}"
+    old_data = mem_entry["data"]
+    new_data = deque(maxlen=MAX_MESSAGES_IN_CACHE)
     
-    # Remove matching lines (with or without timestamp)
-    new_data = [
-        line for line in mem_entry["data"] 
-        if line != target_line_no_ts and line != target_line_with_ts and not line.endswith(message.clean_content)
-    ]
-
-    # Cap to MAX_MESSAGES_IN_CACHE
-    if len(new_data) > MAX_MESSAGES_IN_CACHE:
-        new_data = new_data[-MAX_MESSAGES_IN_CACHE:]
-    
-    _memory_cache[channel_id] = {"data": new_data, "timestamp": time.time()}
-    redis_key = f"context:{channel_id}"
-    redis_client = get_redis_client()
-    if redis_client:
-        await _chunked_redis_set(redis_client, redis_key, new_data, CACHE_TTL)
+    for line in old_data:
+        if not line.endswith(message.clean_content):
+            new_data.append(line)
+            
+    mem_entry["data"] = new_data
+    mem_entry["timestamp"] = time.time()
 
 
 async def invalidate_cache(channel_id: int):
-    """
-    Invalidate cache for a specific channel.
-    Useful when you want to force a refresh.
-    """
     if channel_id in _memory_cache:
         del _memory_cache[channel_id]
-    
-    redis_key = f"context:{channel_id}"
-    redis_client = get_redis_client()
-    if redis_client:
-        try:
-            await _chunked_redis_delete(redis_client, redis_key, keep_base=False)
-        except Exception as e:
-            logger.debug(f"Failed to delete Redis cache: {e}")
