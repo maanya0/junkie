@@ -50,7 +50,7 @@ def create_model(user_id: str):
     
     if PROVIDER == "groq":
         return OpenAILike(
-            id="groq/compound",
+            id=MODEL_NAME,
             max_tokens=4096,
             temperature=MODEL_TEMPERATURE,
             top_p=MODEL_TOP_P,
