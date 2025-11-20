@@ -153,6 +153,7 @@ def create_team_for_user(user_id: str):
         retries=AGENT_RETRIES,
         debug_mode=DEBUG_MODE,
         debug_level=DEBUG_LEVEL,
+        enable_user_memories=True,
     )
 
     return model, team
