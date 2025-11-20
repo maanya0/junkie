@@ -144,7 +144,7 @@ def create_team_for_user(user_id: str):
         tools=[
             ExaTools(), 
             WikipediaTools(), 
-            YouTubeTools()
+            YouTubeTools(),
             e2b_toolkit,
             CalculatorTools(),
             SleepTools()
