@@ -380,6 +380,10 @@ def correct_mentions(prompt, response):
     # Sort by name length descending to prevent partial matches
     sorted_names = sorted(name_to_id.keys(), key=len, reverse=True)
     
+    logger = logging.getLogger(__name__)
+    if sorted_names:
+        logger.info(f"[correct_mentions] Found {len(sorted_names)} names in prompt: {sorted_names}")
+    
     for name in sorted_names:
         uid = name_to_id[name]
         # Regex to match @Name not followed by (ID)
@@ -398,8 +402,11 @@ def correct_mentions(prompt, response):
         
         pattern = re.compile(rf"@?{esc_name}(?!\s*\()(?=[^a-zA-Z0-9_]|$)", re.IGNORECASE)
         
-        # Replace with <@ID>
-        response = pattern.sub(f"<@{uid}>", response)
+        # Check if we have matches before replacing (for logging)
+        if pattern.search(response):
+            logger.info(f"[correct_mentions] Replacing '{name}' with '<@{uid}>'")
+            # Replace with <@ID>
+            response = pattern.sub(f"<@{uid}>", response)
         
     return response
     

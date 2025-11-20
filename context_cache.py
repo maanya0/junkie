@@ -206,7 +206,7 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None, repl
         + "\n".join(context_lines)
         + f"\n{reply_context_str}"
         + f"\n{message_timestamp} {user_label} says: {raw_prompt}\n\n"
-        f"IMPORTANT: The message above is the CURRENT message."
+        f"IMPORTANT: The message above is the CURRENT message that you need to respond to."
     )
     return prompt
 
