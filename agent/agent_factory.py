@@ -125,7 +125,9 @@ def create_team_for_user(user_id: str):
     )
 
     perplexity_agent = Agent(
-        name="Perplexity Agent",
+        id="pplx-agent",
+        name="Perplexity Sonar Pro",
+        role="Fetch accurate, real-time, source-backed information from the live web and perform calculations. Can perform complex queries, competitive analysis, detailed research",
         model=OpenAILike(
         id="sonar-pro",
         temperature=MODEL_TEMPERATURE,
