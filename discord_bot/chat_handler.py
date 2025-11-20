@@ -1,7 +1,7 @@
 import logging
 import sys
 from discord_bot.discord_utils import resolve_mentions, restore_mentions, correct_mentions
-from agent.agent_factory import get_or_create_agent, create_model_and_agent
+from agent.agent_factory import get_or_create_agent, create_model_and_team
 from tools.tools_factory import setup_mcp, get_mcp_tools, MultiMCPTools
 from discord_bot.context_cache import (
     build_context_prompt,
@@ -16,7 +16,7 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str) -> str
     """
     Run the agent with improved error handling and response validation.
     """
-    agent = get_or_create_agent(user_id)
+    agent = get_or_create_team(user_id)
     try:
         result = await agent.arun(
             input=user_text, user_id=user_id, session_id=session_id
@@ -124,7 +124,7 @@ async def main_cli():
     try:
         if sys.stdin and sys.stdin.isatty():
             # For CLI, use a default user_id
-            _, cli_agent = create_model_and_agent("cli_user")
+            _, cli_agent = create_model_and_team("cli_user")
             await cli_agent.acli_app()
         else:
             print("Non-interactive environment detected; skipping CLI app.")
