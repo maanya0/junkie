@@ -124,6 +124,19 @@ def create_team_for_user(user_id: str):
         instructions="You specialize in searching the web, YouTube, and Wikipedia for fresh, accurate information."
     )
 
+    perplexity_agent = Agent(
+        name="Perplexity Agent",
+        model=OpenAILike(
+        id="sonar-pro",
+        temperature=MODEL_TEMPERATURE,
+        top_p=MODEL_TOP_P,
+        base_url=PROVIDER,
+        api_key=CUSTOM_PROVIDER_API_KEY),
+        add_datetime_to_context=True,
+        timezone_identifier="Asia/Kolkata",
+        instructions="You are an AI agent specializing in research and news, providing accurate, up-to-date, well-sourced information with clear, neutral analysis."
+    )
+
     # 2. Code agent (Sandbox execution & calculator)
     code_agent = Agent(
         name="Code Agent",
