@@ -4,16 +4,14 @@ on:
   push:
     branches:
       - main
-      - develop
+      - team
     paths-ignore:
-      - '**.md'
       - 'docs/**'
   pull_request:
     branches:
       - main
-      - develop
+      - team
     paths-ignore:
-      - '**.md'
       - 'docs/**'
 
 concurrency:
@@ -47,10 +45,16 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}/my-app
           tags: |
+            # Keep existing tags (branch name, PR, sha)
             type=ref,event=branch
             type=ref,event=pr
             type=sha,prefix={{branch}}-
+            
+            # Generate :latest only on the default branch (usually main)
             type=raw,value=latest,enable={{is_default_branch}}
+            
+            # Generate :team ONLY when the branch is 'team'
+            type=raw,value=team,enable=${{ github.ref == 'refs/heads/team' }}
 
       - name: Build and push Docker image
         id: build
