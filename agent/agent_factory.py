@@ -142,7 +142,7 @@ def create_team_for_user(user_id: str):
     # 2. Code agent (Sandbox execution & calculator)
     code_agent = Agent(
         name="Code Agent",
-        OpenAILike(
+        model=OpenAILike(
             id="groq/compound",
             max_tokens=8000,
             base_url="https://api.groq.com/openai/v1",
