@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Cache configuration
 CACHE_TTL = int(os.getenv("CACHE_TTL", "120"))  # seconds
-MAX_MESSAGES_IN_CACHE = int(os.getenv("MAX_MESSAGES_IN_CACHE", "500"))
+MAX_MESSAGES_IN_CACHE = int(os.getenv("MAX_MESSAGES_IN_CACHE", "2000"))
 
 # In-memory cache structure:
 # { channel_id: {"data": deque(maxlen=MAX_MESSAGES_IN_CACHE), "timestamp": float} }

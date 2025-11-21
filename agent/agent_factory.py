@@ -17,7 +17,8 @@ from tools.e2b_tools import SandboxManager, E2BToolkit
 from core.config import (
     REDIS_URL, USE_REDIS, PROVIDER, MODEL_NAME, SUPERMEMORY_KEY,
     CUSTOM_PROVIDER_API_KEY, GROQ_API_KEY, MODEL_TEMPERATURE, MODEL_TOP_P,
-    AGENT_HISTORY_RUNS, AGENT_RETRIES, DEBUG_MODE, DEBUG_LEVEL, MAX_AGENTS
+    AGENT_HISTORY_RUNS, AGENT_RETRIES, DEBUG_MODE, DEBUG_LEVEL, MAX_AGENTS,
+    CONTEXT_AGENT_MODEL, CONTEXT_AGENT_MAX_MESSAGES
 )
 from agent.system_prompt import get_system_prompt
 from tools.tools_factory import get_mcp_tools
@@ -149,7 +150,33 @@ The E2B sandbox is a secure, isolated environment that allows you to run code an
     )
 
 
-    # 4. Optional MCP tools agent
+    # 5. Chat Context Q&A Agent (cheap long-context model)
+    context_qna_agent = Agent(
+        id="context-qna-agent",
+        name="Chat Context Q&A",
+        role="Answering questions about users, topics, and past conversations based on extensive chat history",
+        model=OpenAILike(
+            id=CONTEXT_AGENT_MODEL,
+            max_tokens=8000,
+            temperature=0.3,
+            base_url=PROVIDER,
+            api_key=CUSTOM_PROVIDER_API_KEY,
+        ),
+        add_datetime_to_context=True,
+        timezone_identifier="Asia/Kolkata",
+        instructions="""You specialize in answering questions about the chat history, users, and topics discussed.
+
+You have access to extensive conversation history. Use it to:
+- Answer "who said what" questions
+- Summarize discussions on specific topics
+- Track when topics were last mentioned
+- Identify user opinions and statements
+- Provide context about past conversations
+
+Be precise with timestamps and attribute statements accurately to users."""
+    )
+
+    # 6. Optional MCP tools agent
     mcp_tools = get_mcp_tools()
     if mcp_tools:
         mcp_agent = Agent(
@@ -160,9 +187,9 @@ The E2B sandbox is a secure, isolated environment that allows you to run code an
             timezone_identifier="Asia/Kolkata",
             instructions="You specialize in handling MCP-based tool interactions."
         )
-        agents = [perplexity_agent, compound_agent, code_agent,  mcp_agent]
+        agents = [perplexity_agent, compound_agent, code_agent, context_qna_agent, mcp_agent]
     else:
-        agents = [perplexity_agent, compound_agent, code_agent]
+        agents = [perplexity_agent, compound_agent, code_agent, context_qna_agent]
 
     # ---------------------------------------------------------
     # Team Leader (Orchestrator)

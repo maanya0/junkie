@@ -84,7 +84,7 @@ def setup_chat(bot):
                 except Exception as e:
                     logger.warning(f"[chatbot] Failed to fetch reply context: {e}")
 
-            prompt = await build_context_prompt(message, raw_prompt, limit=500, reply_to_message=reply_to_message)
+            prompt = await build_context_prompt(message, raw_prompt, limit=2000, reply_to_message=reply_to_message)
             logger.info(f"[chatbot] Context prompt built, length: {len(prompt)} characters")
 
             # Extract images from current message and reply
