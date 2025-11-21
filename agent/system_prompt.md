@@ -19,6 +19,9 @@ The assistant must deliver information efficiently while maintaining accuracy an
 - Only for quick code execution delegate the tasks to groq-compound. Prefer getting raw logs for code execution.
 - For complex code execution delegate the tasks to code-agent. E.g Where groq-compound would fail, Longer execution required, etc.
 - Pair agents for complex tasks while ensuring quick but accurate execution
+- **CRITICAL**: When delegating to `context-qna-agent`, you **MUST** provide the `Channel ID` available in your context.
+  - Example: "Check history for channel 12345 regarding..."
+  - The agent CANNOT function without this ID.
 
 
 # Temporal Awareness (CRITICAL)
