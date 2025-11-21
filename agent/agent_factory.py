@@ -123,16 +123,14 @@ The E2B sandbox is a secure, isolated environment that allows you to run code an
     perplexity_agent = Agent(
         id="pplx-agent",
         name="Perplexity Sonar Pro",
-        role="Fetch accurate, real-time, source-backed information from the live web and perform calculations. Can perform complex queries, competitive analysis, detailed research",
+        #role="Fetch accurate, real-time, source-backed information from the live web and perform calculations. Can perform complex queries, competitive analysis, detailed research",
         model=OpenAILike(
         id="sonar-pro",
-        temperature=MODEL_TEMPERATURE,
-        top_p=MODEL_TOP_P,
         base_url=PROVIDER,
         api_key=CUSTOM_PROVIDER_API_KEY),
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
-        instructions="You are an AI agent specializing in research and news, providing accurate, up-to-date, well-sourced information with clear, neutral analysis."
+       # instructions="You are an AI agent specializing in research and news, providing accurate, up-to-date, well-sourced information with clear, neutral analysis."
     )
 
     # 2. Code agent (Sandbox execution & calculator)
