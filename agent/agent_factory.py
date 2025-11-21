@@ -183,6 +183,8 @@ The E2B sandbox is a secure, isolated environment that allows you to run code an
         retries=AGENT_RETRIES,
         debug_mode=DEBUG_MODE,
         debug_level=DEBUG_LEVEL,
+        add_team_history_to_members=True,
+        num_team_history_runs=3,
         #enable_user_memories=True,
     )
 
