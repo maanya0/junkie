@@ -2,6 +2,7 @@
 import logging
 import sys
 from discord_bot.discord_utils import resolve_mentions, restore_mentions, correct_mentions
+from agno.media import Image
 # NOTE: updated imports to use team factory functions
 from agent.agent_factory import get_or_create_team, create_team_for_user
 from tools.tools_factory import setup_mcp, get_mcp_tools, MultiMCPTools
@@ -14,7 +15,7 @@ from discord_bot.context_cache import (
 
 logger = logging.getLogger(__name__)
 
-async def async_ask_junkie(user_text: str, user_id: str, session_id: str) -> str:
+async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images: list = None) -> str:
     """
     Run the user's Team with improved error handling and response validation.
     """
@@ -23,7 +24,7 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str) -> str
     try:
         # Teams should implement async arun similar to Agents
         result = await team.arun(
-            input=user_text, user_id=user_id, session_id=session_id
+            input=user_text, user_id=user_id, session_id=session_id, images=images
         )
         
         # Basic response validation
@@ -86,13 +87,30 @@ def setup_chat(bot):
             prompt = await build_context_prompt(message, raw_prompt, limit=500, reply_to_message=reply_to_message)
             logger.info(f"[chatbot] Context prompt built, length: {len(prompt)} characters")
 
+            # Extract images from current message and reply
+            images = []
+            
+            # 1. Current message attachments
+            if message.attachments:
+                for attachment in message.attachments:
+                    if attachment.content_type and attachment.content_type.startswith('image/'):
+                        images.append(Image(url=attachment.url))
+                        logger.info(f"[chatbot] Found image attachment: {attachment.url}")
+
+            # 2. Reply message attachments (if any)
+            if reply_to_message and reply_to_message.attachments:
+                for attachment in reply_to_message.attachments:
+                    if attachment.content_type and attachment.content_type.startswith('image/'):
+                        images.append(Image(url=attachment.url))
+                        logger.info(f"[chatbot] Found reply image attachment: {attachment.url}")
+
             # Step 3: run the Team (shared session per channel)
             async with message.channel.typing():
                 user_id = str(message.author.id)
                 session_id = str(message.channel.id)
                 try:
                     reply = await async_ask_junkie(
-                        prompt, user_id=user_id, session_id=session_id
+                        prompt, user_id=user_id, session_id=session_id, images=images
                     )
                 except Exception as e:
                     # Surface a truncated error to the user; keep details in logs
