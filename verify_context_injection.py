@@ -33,21 +33,25 @@ def test_context_injection():
     
     tool = HistoryTools()
     
-    # 1. Test without context (should fail or return error)
-    print("Test 1: No Context")
-    result = tool.read_chat_history()
-    print(f"Result: {result}")
-    assert "Error" in result
-    
-    # 2. Test with context injection
-    print("\nTest 2: With Context Injection")
-    set_current_channel_id(channel_id)
-    result = tool.read_chat_history()
-    print(f"Result: {result}")
-    assert "context_msg_1" in result
-    assert "context_msg_2" in result
-    
-    print("\nSUCCESS: Context injection works as expected.")
+    async def run_tests():
+        # 1. Test without context (should fail)
+        print("Test 1: No Context")
+        result = await tool.read_chat_history()
+        print(f"Result: {result}")
+        assert "Error" in result
+        
+        # 2. Test with context injection (ID only fallback)
+        print("\nTest 2: With Context Injection (ID only)")
+        set_current_channel_id(channel_id)
+        # Note: We are NOT setting the channel object, so it should fallback to cache
+        result = await tool.read_chat_history()
+        print(f"Result: {result}")
+        assert "context_msg_1" in result
+        assert "context_msg_2" in result
+        
+        print("\nSUCCESS: Context injection works as expected.")
+
+    asyncio.run(run_tests())
 
 if __name__ == "__main__":
     test_context_injection()

@@ -94,9 +94,16 @@ async def get_recent_context(channel, limit: int = 500, before_message=None) -> 
     if mem_entry and now - mem_entry["timestamp"] < CACHE_TTL and before_message is None:
         # Convert deque to list for slicing
         cached_data = list(mem_entry["data"])
-        if len(cached_data) > limit:
+        
+        # Only return if we have enough data or if the cache is likely full (heuristic)
+        # If we requested 2000 but have 100, we should fetch more.
+        if len(cached_data) >= limit:
             return cached_data[-limit:]
-        return cached_data
+        
+        # If we have fewer messages than limit, we might need to fetch more.
+        # However, if the channel simply has few messages, we don't want to spam API.
+        # But for now, let's assume if we want more, we fetch more.
+        logger.info(f"[get_recent_context] Cache has {len(cached_data)} messages, requested {limit}. Fetching more.")
 
     # 2. Fetch from Discord API
     logger.info(f"[get_recent_context] Fetching messages for channel {channel_id}")

@@ -13,7 +13,7 @@ from discord_bot.context_cache import (
     append_message_to_cache,
 )
 from core.config import TEAM_LEADER_CONTEXT_LIMIT
-from core.execution_context import set_current_channel_id
+from core.execution_context import set_current_channel_id, set_current_channel
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,7 @@ def setup_chat(bot):
                 
                 # Set the execution context for tools
                 set_current_channel_id(message.channel.id)
+                set_current_channel(message.channel)
                 
                 try:
                     reply = await async_ask_junkie(
