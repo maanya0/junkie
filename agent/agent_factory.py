@@ -4,6 +4,7 @@ from agno.agent import Agent
 from agno.team import Team
 from agno.db.redis import RedisDb
 from agno.models.openai import OpenAILike
+from agno.tools.mcp import MCPTools
 
 # Tool imports
 from agno.tools.calculator import CalculatorTools
