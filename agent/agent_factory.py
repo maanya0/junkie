@@ -93,23 +93,35 @@ def create_team_for_user(user_id: str):
     # ---------------------------------------------------------
 
     # 1. Web agent (Search + Wikipedia + YouTube)
-    web_agent = Agent(
-        name="Web Agent",
+    code_agent = Agent(
+        id = "code-agent",
+        name="Code Agent",
+        Role="Designing and executing complex code to get tasks done. Run shell commands, run python code in a sandbox",
         model=OpenAILike(
         id="gpt-5",
-        temperature=MODEL_TEMPERATURE,
-        top_p=MODEL_TOP_P,
         base_url=PROVIDER,
         api_key=CUSTOM_PROVIDER_API_KEY,
     ),
         tools=[
             ExaTools(), 
-            WikipediaTools(), 
-            YouTubeTools(),
+            e2b_toolkit()
         ],
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
-        instructions="You specialize in searching the web, YouTube, and Wikipedia for fresh, accurate information."
+        instructions=""" 
+        # E2B Sandbox Usage & Initialization Protocol (CRITICAL)
+The E2B sandbox is a secure, isolated environment that allows you to run code and perform programmatic operations.
+**You must create the sandbox before using any of its capabilities if there are no sandboxes running already.**
+- Do not use timeout greater than 1 hour for creation of a sandbox.
+- Prefer shorter timeout based on the usage.
+
+**Capabilities**:
+1. **Execute Python code**: Run scripts, generate results, text output, images, charts, data processing.
+2. **Run Shell / Terminal Commands**: Execute Linux shell commands, install packages, manage background commands.
+3. **Work With Files**: Upload, read, write, modify, list directories, download files.
+4. **Generate Artifacts**: Capture PNG images, extract chart data, attach artifacts.
+5. **Host Temporary Servers**: Run a web server, expose it through a public URL.(lasts until sandbox timeout)
+"""
     )
 
     perplexity_agent = Agent(
@@ -129,7 +141,7 @@ def create_team_for_user(user_id: str):
 
     # 2. Code agent (Sandbox execution & calculator)
     compound_agent = Agent(
-        id="groq-comound",
+        id="groq-compound",
         name="Groq Compound",
         role = "Fast and accurate code execution with access to real-time data",
         model=OpenAILike(
@@ -154,9 +166,9 @@ def create_team_for_user(user_id: str):
             timezone_identifier="Asia/Kolkata",
             instructions="You specialize in handling MCP-based tool interactions."
         )
-        agents = [perplexity_agent, compound_agent, mcp_agent]
+        agents = [perplexity_agent, compound_agent, code_agent,  mcp_agent]
     else:
-        agents = [perplexity_agent, compound_agent]
+        agents = [perplexity_agent, compound_agent, code_agent]
 
     # ---------------------------------------------------------
     # Team Leader (Orchestrator)
