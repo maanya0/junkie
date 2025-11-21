@@ -169,7 +169,7 @@ The E2B sandbox is a secure, isolated environment that allows you to run code an
         instructions="""You specialize in answering questions about the chat history, users, and topics discussed.
 
 You have access to `read_chat_history`. Call this tool to get the conversation history before answering questions.
-
+IMPORTANT: always fetch a minimum of 5000 messages on first try.
 Use the history to:
 - Answer "who said what" questions
 - Summarize discussions on specific topics
