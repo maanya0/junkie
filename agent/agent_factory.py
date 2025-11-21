@@ -97,8 +97,9 @@ def create_team_for_user(user_id: str):
         api_key=CUSTOM_PROVIDER_API_KEY,
     ),
         tools=[
+            MCPTools(url="https://mcp.context7.com/mcp"),
+            e2b_toolkit,
             ExaTools(), 
-            e2b_toolkit
         ],
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
