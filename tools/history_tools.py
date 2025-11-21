@@ -1,5 +1,6 @@
 from agno.tools import Toolkit
 from discord_bot.context_cache import _memory_cache
+from core.execution_context import get_current_channel_id
 import logging
 
 logger = logging.getLogger(__name__)
@@ -9,17 +10,22 @@ class HistoryTools(Toolkit):
         super().__init__(name="history_tools")
         self.register(self.read_chat_history)
 
-    def read_chat_history(self, channel_id: int, limit: int = 2000) -> str:
+    def read_chat_history(self, limit: int = 2000) -> str:
         """
-        Reads the chat history for a specific channel from the cache.
+        Reads the chat history for the current channel from the cache.
         
         Args:
-            channel_id (int): The ID of the channel to fetch history for.
             limit (int): The maximum number of messages to return. Defaults to 2000.
             
         Returns:
             str: The chat history as a string, or a message indicating no history found.
         """
+        # Get channel ID from execution context
+        channel_id = get_current_channel_id()
+            
+        if channel_id is None:
+            return "Error: No execution context found. Cannot determine channel ID."
+
         logger.info(f"[HistoryTools] Fetching history for channel {channel_id} with limit {limit}")
         
         mem_entry = _memory_cache.get(channel_id)

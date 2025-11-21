@@ -168,8 +168,7 @@ The E2B sandbox is a secure, isolated environment that allows you to run code an
         timezone_identifier="Asia/Kolkata",
         instructions="""You specialize in answering questions about the chat history, users, and topics discussed.
 
-You have access to `read_chat_history`. You MUST call this tool with the provided Channel ID to get the conversation history before answering questions.
-If the Channel ID is missing from the query, ask the user (or Team Leader) for it.
+You have access to `read_chat_history`. Call this tool to get the conversation history before answering questions.
 
 Use the history to:
 - Answer "who said what" questions
