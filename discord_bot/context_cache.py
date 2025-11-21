@@ -169,6 +169,7 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None, repl
         guild_name = "DM"
 
     channel_meta = (
+        f"Channel ID: {message.channel.id}\n"
         f"Channel: {channel_name}\n"
         f"Guild: {guild_name}\n"
         "----\n"

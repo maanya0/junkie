@@ -13,6 +13,7 @@ from agno.tools.wikipedia import WikipediaTools
 from agno.tools.sleep import SleepTools
 from agno.tools.youtube import YouTubeTools
 from tools.e2b_tools import SandboxManager, E2BToolkit
+from tools.history_tools import HistoryTools
 
 from core.config import (
     REDIS_URL, USE_REDIS, PROVIDER, MODEL_NAME, SUPERMEMORY_KEY,
@@ -162,11 +163,14 @@ The E2B sandbox is a secure, isolated environment that allows you to run code an
             base_url=PROVIDER,
             api_key=CUSTOM_PROVIDER_API_KEY,
         ),
+        tools=[HistoryTools()],
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
         instructions="""You specialize in answering questions about the chat history, users, and topics discussed.
 
-You have access to extensive conversation history. Use it to:
+You have access to `read_chat_history`. You MUST call this tool with the provided Channel ID to get the conversation history before answering questions.
+
+Use the history to:
 - Answer "who said what" questions
 - Summarize discussions on specific topics
 - Track when topics were last mentioned

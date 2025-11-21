@@ -12,6 +12,7 @@ from discord_bot.context_cache import (
     delete_message_from_cache,
     append_message_to_cache,
 )
+from core.config import TEAM_LEADER_CONTEXT_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def setup_chat(bot):
                 except Exception as e:
                     logger.warning(f"[chatbot] Failed to fetch reply context: {e}")
 
-            prompt = await build_context_prompt(message, raw_prompt, limit=2000, reply_to_message=reply_to_message)
+            prompt = await build_context_prompt(message, raw_prompt, limit=TEAM_LEADER_CONTEXT_LIMIT, reply_to_message=reply_to_message)
             logger.info(f"[chatbot] Context prompt built, length: {len(prompt)} characters")
 
             # Extract images from current message and reply
