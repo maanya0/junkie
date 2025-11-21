@@ -90,7 +90,7 @@ def create_team_for_user(user_id: str):
     code_agent = Agent(
         id = "code-agent",
         name="Code Agent",
-        Role="Designing and executing complex code to get tasks done. Run shell commands, run python code in a sandbox",
+        role="Designing and executing complex code to get tasks done. Run shell commands, run python code in a sandbox",
         model=OpenAILike(
         id="gpt-5",
         base_url=PROVIDER,
