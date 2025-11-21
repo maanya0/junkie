@@ -66,12 +66,6 @@ def create_model(user_id: str):
         top_p=MODEL_TOP_P,
         base_url=PROVIDER,
         api_key=CUSTOM_PROVIDER_API_KEY,
-        client_params={
-            "default_headers": {
-                "x-supermemory-api-key": SUPERMEMORY_KEY,
-                "x-sm-user-id": user_id
-            }
-        }
     )
 
 
@@ -104,7 +98,7 @@ def create_team_for_user(user_id: str):
     ),
         tools=[
             ExaTools(), 
-            e2b_toolkit()
+            e2b_toolkit
         ],
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
