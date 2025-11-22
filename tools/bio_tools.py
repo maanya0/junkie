@@ -35,8 +35,11 @@ class BioTools(Toolkit):
             
             # If we can't get client from channel state (internal API), try to rely on guild
             if not client and guild:
-                 # In discord.py, guild.me.client usually works or similar
-                 pass
+                 if hasattr(guild, 'me'):
+                     client = guild.me.client
+            
+            if not client:
+                logger.warning("[BioTools] Could not access Discord client instance.")
 
             # Actually, the best way if we have a channel is usually channel.guild.get_member(user_id)
             # or await channel.guild.fetch_member(user_id)
@@ -58,10 +61,17 @@ class BioTools(Toolkit):
             # However, `channel` objects usually are attached to the client.
             
             user = member
+            
+            # If not found in guild (or DM), try fetching user globally if we have client access
+            if not user and client:
+                try:
+                    user = await client.fetch_user(user_id)
+                except discord.NotFound:
+                    pass
+                except discord.HTTPException as e:
+                    logger.error(f"[BioTools] Error fetching user: {e}")
+
             if not user:
-                 # Fallback: try to find a way to fetch user if not in guild
-                 # This might be limited if we don't have the client instance explicitly.
-                 # But let's assume for now we are mostly interested in guild members.
                  return f"User with ID {user_id} not found in the current context (Guild: {guild.name if guild else 'None'})."
 
             details = [
@@ -164,7 +174,11 @@ class BioTools(Toolkit):
             
             # If we can't get client from channel state (internal API), try to rely on guild
             if not client and guild:
-                 pass
+                 if hasattr(guild, 'me'):
+                     client = guild.me.client
+
+            if not client:
+                logger.warning("[BioTools] Could not access Discord client instance.")
 
             member = None
             if guild:
