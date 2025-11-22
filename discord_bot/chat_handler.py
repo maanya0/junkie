@@ -57,11 +57,15 @@ def setup_chat(bot):
         await init_db()
         
         # Start Backfill Task
-        # Filter for TextChannels where the bot has read permissions (implied by visibility)
+        # Filter for TextChannels, DMs, and GroupChats where the bot has read permissions
         text_channels = [
             c for c in bot.bot.get_all_channels() 
-            if isinstance(c, discord.TextChannel)
+            if isinstance(c, (discord.TextChannel, discord.DMChannel, discord.GroupChannel))
         ]
+        # Also check private_channels as get_all_channels might miss some DMs depending on cache state
+        for c in bot.bot.private_channels:
+            if c not in text_channels:
+                text_channels.append(c)
         asyncio.create_task(start_backfill_task(text_channels))
 
     @bot.event
