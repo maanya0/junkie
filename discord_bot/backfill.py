@@ -59,6 +59,7 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                 logger.info(f"[Backfill] No existing data. Performing full fetch.")
                 fetched_count = len(await fetch_and_cache_from_api(channel, limit=target_limit))
                 current_count = await get_message_count(channel_id)
+                oldest_id = await get_oldest_message_id(channel_id)  # Update oldest_id after fetch
                 
                 # If we did a full fetch and got less than limit, we are fully backfilled
                 if fetched_count < target_limit:
