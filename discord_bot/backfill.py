@@ -65,25 +65,50 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                 if fetched_count < target_limit:
                     await mark_channel_fully_backfilled(channel_id, True)
             
-            # 2. Deepen: If still below target, fetch older messages (FIXED INDENTATION)
-            if current_count < target_limit:
+            # 2. Deepen: If still below target, fetch older messages iteratively
+            # Loop until we reach target or can't fetch more (important for cold start resume)
+            max_deepen_iterations = int(os.getenv("BACKFILL_MAX_ITERATIONS", "10"))
+            deepen_iteration = 0
+            
+            while current_count < target_limit and deepen_iteration < max_deepen_iterations:
                 # Check if we already fully backfilled this channel
                 if await is_channel_fully_backfilled(channel_id):
-                    logger.info(f"[Backfill] Channel {channel_name} is marked as fully backfilled. Skipping deepen.")
-                elif oldest_id:  # Only deepen if we have an oldest_id
-                    needed = target_limit - current_count
-                    logger.info(f"[Backfill] Still need {needed} messages. Deepening history before ID {oldest_id}")
-                    try:
-                        before_obj = discord.Object(id=oldest_id)
-                        old_messages = await fetch_and_cache_from_api(channel, limit=needed, before_message=before_obj)
-                        fetched_count += len(old_messages)
+                    logger.info(f"[Backfill] Channel {channel_name} is marked as fully backfilled. Stopping deepen.")
+                    break
+                
+                if not oldest_id:
+                    # Update oldest_id in case it wasn't set
+                    oldest_id = await get_oldest_message_id(channel_id)
+                    if not oldest_id:
+                        logger.warning(f"[Backfill] No oldest_id found for {channel_name}, cannot deepen further.")
+                        break
+                
+                needed = target_limit - current_count
+                logger.info(f"[Backfill] Iteration {deepen_iteration + 1}: Still need {needed} messages. Deepening history before ID {oldest_id}")
+                
+                try:
+                    before_obj = discord.Object(id=oldest_id)
+                    old_messages = await fetch_and_cache_from_api(channel, limit=min(needed, 1000), before_message=before_obj)
+                    fetched_count += len(old_messages)
+                    
+                    # If we fetched 0 messages, we've reached the beginning
+                    if len(old_messages) == 0:
+                        logger.info(f"[Backfill] No older messages found for {channel_name}. Marking as fully backfilled.")
+                        await mark_channel_fully_backfilled(channel_id, True)
+                        break
+                    
+                    # Update counters for next iteration
+                    current_count = await get_message_count(channel_id)
+                    oldest_id = await get_oldest_message_id(channel_id)
+                    deepen_iteration += 1
+                    
+                    # Small delay to avoid hammering the API
+                    if deepen_iteration < max_deepen_iterations and current_count < target_limit:
+                        await asyncio.sleep(0.5)
                         
-                        # If we fetched 0 messages, we've reached the beginning
-                        if len(old_messages) == 0:
-                            logger.info(f"[Backfill] No older messages found for {channel_name}. Marking as fully backfilled.")
-                            await mark_channel_fully_backfilled(channel_id, True)
-                    except Exception as e:
-                        logger.error(f"[Backfill] Error deepening history: {e}")
+                except Exception as e:
+                    logger.error(f"[Backfill] Error deepening history (iteration {deepen_iteration + 1}): {e}")
+                    break
             
             new_count = await get_message_count(channel_id)
             logger.info(f"[Backfill] Completed backfill for {channel_name} ({channel_id}). Fetched: {fetched_count}, New Total: {new_count}")
