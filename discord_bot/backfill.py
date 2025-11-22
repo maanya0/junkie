@@ -1,6 +1,7 @@
 import logging
 import asyncio
-from core.database import get_message_count, get_latest_message_id, get_oldest_message_id
+import os
+from core.database import get_message_count, get_latest_message_id, get_oldest_message_id, is_channel_fully_backfilled, mark_channel_fully_backfilled
 from discord_bot.context_cache import fetch_and_cache_from_api
 from core.config import CONTEXT_AGENT_MAX_MESSAGES
 import discord
@@ -45,20 +46,34 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
             # Re-check count
             current_count = await get_message_count(channel_id)
             
-            # 2. Deepen: If still below target, fetch older messages
+        # 2. Deepen: If still below target, fetch older messages
             if current_count < target_limit:
-                needed = target_limit - current_count
-                logger.info(f"[Backfill] Still need {needed} messages. Deepening history before ID {oldest_id}")
-                try:
-                    before_obj = discord.Object(id=oldest_id)
-                    old_messages = await fetch_and_cache_from_api(channel, limit=needed, before_message=before_obj)
-                    fetched_count += len(old_messages)
-                except Exception as e:
-                    logger.error(f"[Backfill] Error deepening history: {e}")
+                # Check if we already fully backfilled this channel
+                if await is_channel_fully_backfilled(channel_id):
+                    logger.info(f"[Backfill] Channel {channel_name} is marked as fully backfilled. Skipping deepen.")
+                else:
+                    needed = target_limit - current_count
+                    logger.info(f"[Backfill] Still need {needed} messages. Deepening history before ID {oldest_id}")
+                    try:
+                        before_obj = discord.Object(id=oldest_id)
+                        old_messages = await fetch_and_cache_from_api(channel, limit=needed, before_message=before_obj)
+                        fetched_count += len(old_messages)
+                        
+                        # If we fetched 0 messages (or very few), we might be done
+                        if len(old_messages) == 0:
+                            logger.info(f"[Backfill] No older messages found for {channel_name}. Marking as fully backfilled.")
+                            await mark_channel_fully_backfilled(channel_id, True)
+                            
+                    except Exception as e:
+                        logger.error(f"[Backfill] Error deepening history: {e}")
         else:
             # No data, full fetch
             logger.info(f"[Backfill] No existing data. Performing full fetch.")
             fetched_count = len(await fetch_and_cache_from_api(channel, limit=target_limit))
+            
+            # If we did a full fetch and got less than limit, we are fully backfilled
+            if fetched_count < target_limit:
+                 await mark_channel_fully_backfilled(channel_id, True)
         
         new_count = await get_message_count(channel_id)
         logger.info(f"[Backfill] Completed backfill for {channel_name} ({channel_id}). Fetched: {fetched_count}, New Total: {new_count}")
@@ -68,13 +83,21 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
 
 async def start_backfill_task(channels):
     """
-    Start background backfill for a list of channels.
+    Start background backfill for a list of channels with concurrency control.
     """
-    logger.info(f"[Backfill] Starting background backfill for {len(channels)} channels.")
-    for channel in channels:
-        # Run sequentially to avoid flooding Discord API too hard concurrently
-        # Or use a semaphore if we want some concurrency.
-        # Given 80k limit, sequential is safer for rate limits.
-        await backfill_channel(channel)
-        # Small sleep between channels
-        await asyncio.sleep(5)
+    # Default to 2 concurrent channels to be safe with rate limits
+    concurrency = int(os.getenv("BACKFILL_CONCURRENCY", "2"))
+    sem = asyncio.Semaphore(concurrency)
+    
+    logger.info(f"[Backfill] Starting background backfill for {len(channels)} channels with concurrency {concurrency}.")
+    
+    async def bound_backfill(channel):
+        async with sem:
+            await backfill_channel(channel)
+            # Small sleep to be nice to API even with semaphore
+            await asyncio.sleep(1)
+
+    # Create tasks for all channels
+    tasks = [bound_backfill(c) for c in channels]
+    await asyncio.gather(*tasks)
+    logger.info("[Backfill] All backfill tasks completed.")

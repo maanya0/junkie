@@ -45,6 +45,12 @@ async def create_schema():
             
             CREATE INDEX IF NOT EXISTS idx_messages_channel_created 
             ON messages (channel_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS channel_status (
+                channel_id BIGINT PRIMARY KEY,
+                is_fully_backfilled BOOLEAN DEFAULT FALSE,
+                last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
         """)
         logger.info("Database schema initialized.")
 
@@ -140,3 +146,32 @@ async def get_oldest_message_id(channel_id: int) -> Optional[int]:
     except Exception as e:
         logger.error(f"Failed to get oldest message ID for channel {channel_id}: {e}")
         return None
+
+async def is_channel_fully_backfilled(channel_id: int) -> bool:
+    """Check if a channel is marked as fully backfilled."""
+    if not pool:
+        return False
+    try:
+        async with pool.acquire() as conn:
+            return await conn.fetchval("""
+                SELECT is_fully_backfilled FROM channel_status WHERE channel_id = $1
+            """, channel_id) or False
+    except Exception as e:
+        logger.error(f"Failed to check backfill status for {channel_id}: {e}")
+        return False
+
+async def mark_channel_fully_backfilled(channel_id: int, status: bool = True):
+    """Mark a channel as fully backfilled."""
+    if not pool:
+        return
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO channel_status (channel_id, is_fully_backfilled, last_updated)
+                VALUES ($1, $2, CURRENT_TIMESTAMP)
+                ON CONFLICT (channel_id) DO UPDATE SET
+                    is_fully_backfilled = EXCLUDED.is_fully_backfilled,
+                    last_updated = EXCLUDED.last_updated;
+            """, channel_id, status)
+    except Exception as e:
+        logger.error(f"Failed to mark backfill status for {channel_id}: {e}")

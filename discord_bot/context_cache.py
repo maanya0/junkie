@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict
 from dotenv import load_dotenv
-from core.database import store_message, get_messages, get_message_count
+from core.database import store_message, get_messages, get_message_count, is_channel_fully_backfilled, mark_channel_fully_backfilled
 import discord
 
 load_dotenv()
@@ -108,11 +108,45 @@ async def get_recent_context(channel, limit: int = 500, before_message=None) -> 
         logger.info(f"[get_recent_context] DB empty for {channel_id}, fetching from API.")
         return await fetch_and_cache_from_api(channel, limit, before_message)
     
-    # If we have some data but not enough, return what we have + trigger backfill?
-    # For now, return what we have to be "instant".
+    # If we have some data but not enough, check if we can fetch more
+    if len(db_messages) < limit:
+        # Check if channel is fully backfilled (meaning no more history exists)
+        is_full = await is_channel_fully_backfilled(channel_id)
+        
+        if not is_full:
+            needed = limit - len(db_messages)
+            logger.info(f"[get_recent_context] DB has {len(db_messages)} messages, need {needed} more. Fetching from API.")
+            
+            # Oldest message in DB is the last one in the list (chronological)?
+            # Wait, get_messages returns chronological list [oldest, ..., newest]
+            # So oldest is db_messages[0]
+            oldest_msg_id = db_messages[0]['message_id']
+            
+            try:
+                before_obj = discord.Object(id=oldest_msg_id)
+                more_messages = await fetch_and_cache_from_api(channel, limit=needed, before_message=before_obj)
+                
+                if not more_messages:
+                    # If API returns nothing, we are likely fully backfilled
+                    await mark_channel_fully_backfilled(channel_id, True)
+                else:
+                    # Combine: more_messages (older) + formatted_db_messages (newer)
+                    # But wait, fetch_and_cache_from_api returns formatted strings.
+                    # We need to format db_messages first.
+                    pass 
+            except Exception as e:
+                logger.error(f"[get_recent_context] Error fetching more history: {e}")
+
     logger.info(f"[get_recent_context] Returning {len(db_messages)} messages from DB (requested {limit}).")
     formatted = []
     current_time = datetime.now(timezone.utc)
+    
+    # If we fetched more messages, we should re-query DB to get everything sorted correctly?
+    # Or just append. Re-querying is safer for order.
+    if len(db_messages) < limit and not await is_channel_fully_backfilled(channel_id):
+         # Re-fetch to include newly cached messages
+         db_messages = await get_messages(channel_id, limit)
+
     for m in db_messages:
         rel_time = format_message_timestamp(m['created_at'], current_time)
         formatted.append(f"{rel_time} {m['author_name']}({m['author_id']}): {m['content']}")
