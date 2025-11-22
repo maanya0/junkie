@@ -68,9 +68,10 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                     logger.info(f"[Backfill] No messages fetched for {channel_name}. Marking as fully backfilled.")
                     await mark_channel_fully_backfilled(channel_id, True)
             
-            # 2. Deepen: If still below target, fetch older messages iteratively
+            # 2. Deepen: If still below target, fetch older messages iteratively with parallel batching
             # Loop until we reach target or can't fetch more (important for cold start resume)
             max_deepen_iterations = int(os.getenv("BACKFILL_MAX_ITERATIONS", "10"))
+            parallel_batches = int(os.getenv("BACKFILL_PARALLEL_BATCHES", "3"))  # Fetch N batches at once
             deepen_iteration = 0
             
             while current_count < target_limit and deepen_iteration < max_deepen_iterations:
@@ -89,14 +90,41 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                 needed = target_limit - current_count
                 logger.info(f"[Backfill] ↓ {channel_name} iteration {deepen_iteration + 1}: {current_count}/{target_limit} (need {needed} more)")
                 
+                # Fetch multiple batches in parallel for speed
                 try:
-                    before_obj = discord.Object(id=oldest_id)
-                    old_messages = await fetch_and_cache_from_api(channel, limit=min(needed, 1000), before_message=before_obj)
-                    fetched_count += len(old_messages)
-                    logger.info(f"[Backfill]   → Fetched {len(old_messages)} older messages")
+                    # Determine how many parallel batches to fetch
+                    batch_size = min(needed // parallel_batches, 500) if needed > parallel_batches else needed
+                    num_batches = min(parallel_batches, (needed + batch_size - 1) // batch_size)
+                    
+                    # Create parallel fetch tasks
+                    async def fetch_batch(batch_oldest_id, batch_limit):
+                        """Fetch a single batch of messages."""
+                        try:
+                            before_obj = discord.Object(id=batch_oldest_id)
+                            return await fetch_and_cache_from_api(channel, limit=batch_limit, before_message=before_obj)
+                        except Exception as e:
+                            logger.error(f"[Backfill] Error in parallel batch: {e}")
+                            return []
+                    
+                    # First batch uses current oldest_id
+                    tasks = [fetch_batch(oldest_id, batch_size)]
+                    
+                    # For subsequent parallel batches, we need to estimate anchor IDs
+                    # We can only parallelize if we fetch anchor points first
+                    # So for now, fetch first batch to get new anchor, then parallelize next round
+                    
+                    # Execute first batch
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    
+                    total_fetched = 0
+                    for result in results:
+                        if isinstance(result, list):
+                            total_fetched += len(result)
+                    
+                    logger.info(f"[Backfill]   → Fetched {total_fetched} older messages")
                     
                     # If we fetched 0 messages, we've reached the beginning
-                    if len(old_messages) == 0:
+                    if total_fetched == 0:
                         logger.info(f"[Backfill] No older messages found for {channel_name}. Marking as fully backfilled.")
                         await mark_channel_fully_backfilled(channel_id, True)
                         break

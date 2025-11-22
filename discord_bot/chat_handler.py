@@ -1,4 +1,4 @@
-# chat_handler.py
+l# chat_handler.py
 import logging
 import sys
 import time
@@ -15,7 +15,7 @@ from discord_bot.context_cache import (
 )
 from core.config import TEAM_LEADER_CONTEXT_LIMIT
 from core.execution_context import set_current_channel_id, set_current_channel
-from core.database import init_db
+from core.database import init_db, close_db
 from discord_bot.backfill import start_backfill_task
 import asyncio
 import discord
