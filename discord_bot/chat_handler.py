@@ -51,11 +51,14 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images
 def setup_chat(bot):
     @bot.event
     async def on_ready():
+        logger.info("[on_ready] Bot ready event triggered!")
         # Ensure MCP tools are connected/initialized
         await setup_mcp()
         
         # Initialize Database
+        logger.info("[on_ready] Initializing database...")
         await init_db()
+        logger.info("[on_ready] Database initialized")
         
         # Start Backfill Task
         # Filter for TextChannels, DMs, and GroupChats where the bot has read permissions
@@ -68,14 +71,20 @@ def setup_chat(bot):
             if c not in text_channels:
                 text_channels.append(c)
         
+        logger.info(f"[on_ready] Found {len(text_channels)} channels to backfill")
+        
         # Start backfill task with error handling
         async def run_backfill():
             try:
+                logger.info("[on_ready] Starting backfill task...")
                 await start_backfill_task(text_channels)
+                logger.info("[on_ready] Backfill task completed")
             except Exception as e:
                 logger.error(f"[on_ready] Backfill task failed: {e}", exc_info=True)
         
+        logger.info(f"[on_ready] Creating backfill background task for {len(text_channels)} channels...")
         asyncio.create_task(run_backfill())
+        logger.info("[on_ready] Backfill task created - running in background")
     
     @bot.event
     async def on_disconnect():
