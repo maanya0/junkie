@@ -27,7 +27,7 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images
     Run the user's Team with improved error handling and response validation.
     """
     # get_or_create_team returns a Team instance (or equivalent orchestrator)
-    team = get_or_create_team(user_id)
+    team = await get_or_create_team(user_id)  # NOW ASYNC
     try:
         # Teams should implement async arun similar to Agents
         result = await team.arun(
@@ -67,7 +67,21 @@ def setup_chat(bot):
         for c in bot.bot.private_channels:
             if c not in text_channels:
                 text_channels.append(c)
-        asyncio.create_task(start_backfill_task(text_channels))
+        
+        # Start backfill task with error handling
+        async def run_backfill():
+            try:
+                await start_backfill_task(text_channels)
+            except Exception as e:
+                logger.error(f"[on_ready] Backfill task failed: {e}", exc_info=True)
+        
+        asyncio.create_task(run_backfill())
+    
+    @bot.event
+    async def on_disconnect():
+        """Clean shutdown of database connections and resources."""
+        logger.info("[on_disconnect] Bot disconnecting, closing database pool...")
+        await close_db()
 
     @bot.event
     async def on_message(message):

@@ -221,22 +221,54 @@ Be precise with timestamps and attribute statements accurately to users."""
 # -------------------------------------------------------------
 # TEAM CACHE — per user team instance
 # -------------------------------------------------------------
-_user_teams = {}
+from collections import OrderedDict
+_user_teams = OrderedDict()
 
 
-def get_or_create_team(user_id: str):
+async def get_or_create_team(user_id: str):
     """
     Get existing team for a user or create a new one.
-    Uses FIFO eviction if cache exceeds MAX_AGENTS.
+    Uses LRU eviction if cache exceeds MAX_AGENTS.
+    Implements proper resource cleanup when evicting teams.
     """
-    if user_id not in _user_teams:
+    if user_id in _user_teams:
+        # Move to end (mark as recently used)
+        _user_teams.move_to_end(user_id)
+        return _user_teams[user_id]
 
-        # If cache full, evict oldest agent entry
-        if len(_user_teams) >= MAX_AGENTS:
-            oldest_key = next(iter(_user_teams))
-            del _user_teams[oldest_key]
+    # If cache full, evict oldest (least recently used) team
+    if len(_user_teams) >= MAX_AGENTS:
+        oldest_user, oldest_team = _user_teams.popitem(last=False)
+        logger.info(f"[TeamCache] Evicting team for user {oldest_user} (cache size: {MAX_AGENTS})")
+        
+        # Cleanup evicted team resources
+        try:
+            # Cleanup MCP connections if any
+            if hasattr(oldest_team, 'members'):
+                for member in oldest_team.members:
+                    # Check if member has MCP tools that need cleanup
+                    if hasattr(member, 'tools'):
+                        for tool in member.tools:
+                            if hasattr(tool, 'close'):
+                                try:
+                                    if hasattr(tool.close, '__await__'):
+                                        await tool.close()
+                                    else:
+                                        tool.close()
+                                except Exception as e:
+                                    logger.warning(f"[TeamCache] Error closing tool: {e}")
+            
+            # Cleanup team-level resources if available
+            if hasattr(oldest_team, 'cleanup'):
+                if hasattr(oldest_team.cleanup, '__await__'):
+                    await oldest_team.cleanup()
+                else:
+                    oldest_team.cleanup()
+        except Exception as e:
+            logger.error(f"[TeamCache] Error during team cleanup: {e}", exc_info=True)
 
-        _, team = create_team_for_user(user_id)
-        _user_teams[user_id] = team
+    _, team = create_team_for_user(user_id)
+    _user_teams[user_id] = team
+    logger.info(f"[TeamCache] Created new team for user {user_id} (cache size: {len(_user_teams)}/{MAX_AGENTS})")
 
-    return _user_teams[user_id]
+    return team

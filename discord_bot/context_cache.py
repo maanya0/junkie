@@ -83,6 +83,7 @@ def format_message_timestamp(message_created_at, current_time: datetime) -> str:
 async def get_recent_context(channel, limit: int = 500, before_message=None) -> List[str]:
     """
     Get recent messages from DB or Discord API.
+    Implements loop prevention to avoid infinite recursion.
     """
     channel_id = channel.id
     
@@ -117,9 +118,7 @@ async def get_recent_context(channel, limit: int = 500, before_message=None) -> 
             needed = limit - len(db_messages)
             logger.info(f"[get_recent_context] DB has {len(db_messages)} messages, need {needed} more. Fetching from API.")
             
-            # Oldest message in DB is the last one in the list (chronological)?
-            # Wait, get_messages returns chronological list [oldest, ..., newest]
-            # So oldest is db_messages[0]
+            # Oldest message in DB is the first one in the list (chronological)
             oldest_msg_id = db_messages[0]['message_id']
             
             try:
@@ -129,25 +128,20 @@ async def get_recent_context(channel, limit: int = 500, before_message=None) -> 
                 if not more_messages:
                     # If API returns nothing, we are likely fully backfilled
                     await mark_channel_fully_backfilled(channel_id, True)
-                else:
-                    # Combine: more_messages (older) + formatted_db_messages (newer)
-                    # But wait, fetch_and_cache_from_api returns formatted strings.
-                    # We need to format db_messages first.
-                    pass 
             except Exception as e:
                 logger.error(f"[get_recent_context] Error fetching more history: {e}")
 
+    # FIXED: Don't re-fetch in a loop. Return what we have after one attempt.
     logger.info(f"[get_recent_context] Returning {len(db_messages)} messages from DB (requested {limit}).")
-    formatted = []
-    current_time = datetime.now(timezone.utc)
     
-    # If we fetched more messages, we should re-query DB to get everything sorted correctly?
-    # Or just append. Re-querying is safer for order.
-    if len(db_messages) < limit and not await is_channel_fully_backfilled(channel_id):
-         # Re-fetch to include newly cached messages
-         db_messages = await get_messages(channel_id, limit)
-
-    for m in db_messages:
+    # Format messages with current time (calculated once)
+    current_time = datetime.now(timezone.utc)
+    formatted = []
+    
+    # Re-query DB one final time to include any newly cached messages
+    final_db_messages = await get_messages(channel_id, limit)
+    
+    for m in final_db_messages:
         rel_time = format_message_timestamp(m['created_at'], current_time)
         formatted.append(f"{rel_time} {m['author_name']}({m['author_id']}): {m['content']}")
     return formatted
@@ -159,7 +153,11 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
         logger.info(f"[fetch_and_cache] Fetching up to {limit} messages for channel {channel_name} ({channel.id})")
         messages = []
         current_time = datetime.now(timezone.utc)
-        fetch_limit = int(limit * 1.5)
+        
+        # Cap fetch_limit to prevent overwhelming the API (Discord max is 100 per request)
+        # Reasonable cap: 1000 messages (10 API requests with proper pagination)
+        BACKFILL_MAX_FETCH_LIMIT = int(os.getenv("BACKFILL_MAX_FETCH_LIMIT", "1000"))
+        fetch_limit = min(int(limit * 1.2), BACKFILL_MAX_FETCH_LIMIT)  # 20% buffer, capped
         
         if after_message:
             # When using 'after', Discord returns oldest -> newest

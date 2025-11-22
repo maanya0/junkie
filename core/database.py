@@ -43,8 +43,16 @@ async def create_schema():
                 timestamp_str TEXT NOT NULL
             );
             
-            CREATE INDEX IF NOT EXISTS idx_messages_channel_created 
-            ON messages (channel_id, created_at DESC);
+            -- Optimized index for chronological queries (ASC order)
+            CREATE INDEX IF NOT EXISTS idx_messages_channel_created_asc
+            ON messages (channel_id, created_at ASC);
+            
+            -- Index for message_id lookups (upserts)
+            CREATE INDEX IF NOT EXISTS idx_messages_message_id
+            ON messages (message_id);
+            
+            -- Drop old DESC index if it exists (no longer needed)
+            DROP INDEX IF EXISTS idx_messages_channel_created;
 
             CREATE TABLE IF NOT EXISTS channel_status (
                 channel_id BIGINT PRIMARY KEY,
@@ -52,7 +60,7 @@ async def create_schema():
                 last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         """)
-        logger.info("Database schema initialized.")
+        logger.info("Database schema initialized with optimized indexes.")
 
 async def store_message(
     message_id: int,
@@ -78,23 +86,25 @@ async def store_message(
             """, message_id, channel_id, author_id, author_name, content, created_at, timestamp_str)
     except Exception as e:
         logger.error(f"Failed to store message {message_id}: {e}")
+        raise  # Propagate error to caller instead of silently swallowing
 
 async def get_messages(channel_id: int, limit: int = 2000) -> List[Dict]:
-    """Retrieve recent messages for a channel."""
+    """Retrieve recent messages for a channel in chronological order."""
     if not pool:
         return []
 
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT * FROM messages 
+                SELECT message_id, channel_id, author_id, author_name, content, created_at
+                FROM messages 
                 WHERE channel_id = $1 
-                ORDER BY created_at DESC 
+                ORDER BY created_at ASC 
                 LIMIT $2
             """, channel_id, limit)
             
-            # Return reversed (chronological)
-            return list(reversed([dict(row) for row in rows]))
+            # Return chronological order (no need to reverse)
+            return [dict(row) for row in rows]
     except Exception as e:
         logger.error(f"Failed to get messages for channel {channel_id}: {e}")
         return []

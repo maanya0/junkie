@@ -65,7 +65,7 @@ async def _summarize_messages(messages):
     prompt = _build_prompt(messages)
     try:
         response = await client.chat.completions.create(
-            model="moonshotai/kimi-k2-instruct",
+            model="llama-3.1-70b-versatile",  # Fixed: Use valid Groq model instead of moonshot
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
         )
