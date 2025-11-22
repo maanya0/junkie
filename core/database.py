@@ -43,16 +43,16 @@ async def create_schema():
                 timestamp_str TEXT NOT NULL
             );
             
-            -- Optimized index for chronological queries (ASC order)
-            CREATE INDEX IF NOT EXISTS idx_messages_channel_created_asc
-            ON messages (channel_id, created_at ASC);
+            -- Optimized index for fetching recent messages (DESC order)
+            CREATE INDEX IF NOT EXISTS idx_messages_channel_created
+            ON messages (channel_id, created_at DESC);
             
             -- Index for message_id lookups (upserts)
             CREATE INDEX IF NOT EXISTS idx_messages_message_id
             ON messages (message_id);
             
-            -- Drop old DESC index if it exists (no longer needed)
-            DROP INDEX IF EXISTS idx_messages_channel_created;
+            -- Drop old ASC index if it exists
+            DROP INDEX IF EXISTS idx_messages_channel_created_asc;
 
             CREATE TABLE IF NOT EXISTS channel_status (
                 channel_id BIGINT PRIMARY KEY,
@@ -89,22 +89,23 @@ async def store_message(
         raise  # Propagate error to caller instead of silently swallowing
 
 async def get_messages(channel_id: int, limit: int = 2000) -> List[Dict]:
-    """Retrieve recent messages for a channel in chronological order."""
+    """Retrieve the most recent messages for a channel in chronological order."""
     if not pool:
         return []
 
     try:
         async with pool.acquire() as conn:
+            # ORDER BY DESC to get NEWEST messages first, then reverse to chronological
             rows = await conn.fetch("""
                 SELECT message_id, channel_id, author_id, author_name, content, created_at
                 FROM messages 
                 WHERE channel_id = $1 
-                ORDER BY created_at ASC 
+                ORDER BY created_at DESC 
                 LIMIT $2
             """, channel_id, limit)
             
-            # Return chronological order (no need to reverse)
-            return [dict(row) for row in rows]
+            # Reverse to chronological order (oldest to newest) for display
+            return list(reversed([dict(row) for row in rows]))
     except Exception as e:
         logger.error(f"Failed to get messages for channel {channel_id}: {e}")
         return []
