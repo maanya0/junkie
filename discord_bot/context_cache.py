@@ -95,8 +95,11 @@ async def get_recent_context(channel, limit: int = 500, before_message=None) -> 
     # get_messages needs updating. For chatbot context, latest is usually what we want.
     if len(db_messages) >= limit and before_message is None:
         formatted = []
+        current_time = datetime.now(timezone.utc)
         for m in db_messages:
-            formatted.append(f"{m['timestamp_str']} {m['author_name']}({m['author_id']}): {m['content']}")
+            # Calculate relative time dynamically
+            rel_time = format_message_timestamp(m['created_at'], current_time)
+            formatted.append(f"{rel_time} {m['author_name']}({m['author_id']}): {m['content']}")
         return formatted
 
     # 2. If DB has insufficient data, we might rely on backfill or fetch fresh
@@ -109,18 +112,28 @@ async def get_recent_context(channel, limit: int = 500, before_message=None) -> 
     # For now, return what we have to be "instant".
     logger.info(f"[get_recent_context] Returning {len(db_messages)} messages from DB (requested {limit}).")
     formatted = []
+    current_time = datetime.now(timezone.utc)
     for m in db_messages:
-        formatted.append(f"{m['timestamp_str']} {m['author_name']}({m['author_id']}): {m['content']}")
+        rel_time = format_message_timestamp(m['created_at'], current_time)
+        formatted.append(f"{rel_time} {m['author_name']}({m['author_id']}): {m['content']}")
     return formatted
 
-async def fetch_and_cache_from_api(channel, limit, before_message=None):
+async def fetch_and_cache_from_api(channel, limit, before_message=None, after_message=None):
     """Helper to fetch from API and cache to DB."""
     try:
+        logger.info(f"[fetch_and_cache] Fetching up to {limit} messages for channel {channel.name} ({channel.id})")
         messages = []
         current_time = datetime.now(timezone.utc)
         fetch_limit = int(limit * 1.5)
         
-        if before_message:
+        if after_message:
+            # When using 'after', Discord returns oldest -> newest
+            async for m in channel.history(limit=fetch_limit, after=after_message):
+                if m.content and m.content.strip():
+                    messages.append(m)
+                    if len(messages) >= limit:
+                        break
+        elif before_message:
             async for m in channel.history(limit=fetch_limit, before=before_message):
                 if m.content and m.content.strip():
                     messages.append(m)
@@ -133,11 +146,18 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None):
                     if len(messages) >= limit:
                         break
         
-        messages.reverse() # Chronological
+        # If NOT using 'after', the default history order is newest -> oldest, 
+        # so we reverse to get chronological.
+        # If using 'after', it's already chronological (oldest -> newest).
+        if not after_message:
+            messages.reverse() # Chronological
         
         formatted = []
+        stored_count = 0
         for m in messages:
-            timestamp_str = format_message_timestamp(m.created_at, current_time)
+            # Store absolute timestamp for hygiene, but use dynamic relative time for return
+            timestamp_str = m.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            rel_time = format_message_timestamp(m.created_at, current_time)
             
             # Store in DB
             await store_message(
@@ -149,11 +169,13 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None):
                 created_at=m.created_at,
                 timestamp_str=timestamp_str
             )
+            stored_count += 1
             
             formatted.append(
-                f"{timestamp_str} {m.author.display_name}({m.author.id}): {m.clean_content}"
+                f"{rel_time} {m.author.display_name}({m.author.id}): {m.clean_content}"
             )
-            
+        
+        logger.info(f"[fetch_and_cache] Successfully stored {stored_count} messages for channel {channel.id}")
         return formatted
     except discord.errors.Forbidden:
         logger.warning(f"[fetch_and_cache] Missing access to channel {channel.id}. Skipping.")
@@ -245,7 +267,7 @@ async def append_message_to_cache(message):
         return
 
     current_time = datetime.now(timezone.utc)
-    timestamp_str = format_message_timestamp(message.created_at, current_time)
+    timestamp_str = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
     
     await store_message(
         message_id=message.id,

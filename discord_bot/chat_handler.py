@@ -1,6 +1,7 @@
 # chat_handler.py
 import logging
 import sys
+import time
 from discord_bot.discord_utils import resolve_mentions, restore_mentions, correct_mentions
 from agno.media import Image
 # NOTE: updated imports to use team factory functions
@@ -130,10 +131,14 @@ def setup_chat(bot):
                 user_id = str(message.author.id)
                 session_id = str(message.channel.id)
                 
+                # Log invocation
+                logger.info(f"[chatbot] Agent invoked in channel {message.channel.name} ({message.channel.id}) by user {message.author.name} ({user_id})")
+                
                 # Set the execution context for tools
                 set_current_channel_id(message.channel.id)
                 set_current_channel(message.channel)
                 
+                start_time = time.time()
                 try:
                     reply = await async_ask_junkie(
                         prompt, user_id=user_id, session_id=session_id, images=images
@@ -145,13 +150,19 @@ def setup_chat(bot):
                         f"**Error:** Failed to process request: {str(e)[:500]}"
                     )
                     return
-
+                
+                end_time = time.time()
+                time_taken = end_time - start_time
+                
             # Step 4: restore mentions in the reply
             final_reply = restore_mentions(reply, message.guild)
             # Remove any agent-supplied prefix artifacts
             final_reply = final_reply.replace("**🗿 hero:**", "")
             # Replace any leftover plain @name with actual mentions
             final_reply = correct_mentions(prompt, final_reply)
+            
+            # Append time taken
+            final_reply += f"\n\n*(Time taken: {time_taken:.2f}s)*"
             
             # Step 5: send reply, chunking long outputs (Discord limit is ~2000 chars)
             chunk_size = 1900

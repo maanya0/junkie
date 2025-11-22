@@ -106,3 +106,37 @@ async def get_message_count(channel_id: int) -> int:
     except Exception as e:
         logger.error(f"Failed to count messages for channel {channel_id}: {e}")
         return 0
+
+async def get_latest_message_id(channel_id: int) -> Optional[int]:
+    """Get the ID of the newest message stored for a channel."""
+    if not pool:
+        return None
+
+    try:
+        async with pool.acquire() as conn:
+            return await conn.fetchval("""
+                SELECT message_id FROM messages 
+                WHERE channel_id = $1 
+                ORDER BY created_at DESC 
+                LIMIT 1
+            """, channel_id)
+    except Exception as e:
+        logger.error(f"Failed to get latest message ID for channel {channel_id}: {e}")
+        return None
+
+async def get_oldest_message_id(channel_id: int) -> Optional[int]:
+    """Get the ID of the oldest message stored for a channel."""
+    if not pool:
+        return None
+
+    try:
+        async with pool.acquire() as conn:
+            return await conn.fetchval("""
+                SELECT message_id FROM messages 
+                WHERE channel_id = $1 
+                ORDER BY created_at ASC 
+                LIMIT 1
+            """, channel_id)
+    except Exception as e:
+        logger.error(f"Failed to get oldest message ID for channel {channel_id}: {e}")
+        return None
