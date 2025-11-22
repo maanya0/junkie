@@ -25,6 +25,8 @@ from agent.system_prompt import get_system_prompt
 from tools.tools_factory import get_mcp_tools
 from core.observability import setup_phoenix_tracing
 
+logger = logging.getLogger(__name__)
+
 
 # -----------------------------------
 # Initialize E2B Sandbox
