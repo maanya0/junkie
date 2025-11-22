@@ -19,7 +19,7 @@ from core.config import (
     REDIS_URL, USE_REDIS, PROVIDER, MODEL_NAME, SUPERMEMORY_KEY,
     CUSTOM_PROVIDER_API_KEY, GROQ_API_KEY, MODEL_TEMPERATURE, MODEL_TOP_P,
     AGENT_HISTORY_RUNS, AGENT_RETRIES, DEBUG_MODE, DEBUG_LEVEL, MAX_AGENTS,
-    CONTEXT_AGENT_MODEL, CONTEXT_AGENT_MAX_MESSAGES
+    CONTEXT_AGENT_MODEL, CONTEXT_AGENT_MAX_MESSAGES, FIRECRAWL_API_KEY
 )
 from agent.system_prompt import get_system_prompt
 from tools.tools_factory import get_mcp_tools
@@ -92,6 +92,20 @@ def create_team_for_user(user_id: str):
     # ---------------------------------------------------------
 
     # 1. Web agent (Search + Wikipedia + YouTube)
+    # Build code agent tools dynamically based on available API keys
+    code_agent_tools = [
+        MCPTools(transport="streamable-http", url="https://mcp.context7.com/mcp"),
+        e2b_toolkit,
+        ExaTools(),
+    ]
+    
+    # Add Firecrawl MCP server if API key is available
+    if FIRECRAWL_API_KEY:
+        firecrawl_url = f"https://mcp.firecrawl.dev/{FIRECRAWL_API_KEY}/v2/mcp"
+        code_agent_tools.append(
+            MCPTools(transport="streamable-http", url=firecrawl_url)
+        )
+    
     code_agent = Agent(
         id = "code-agent",
         name="Code Agent",
@@ -101,11 +115,7 @@ def create_team_for_user(user_id: str):
         base_url=PROVIDER,
         api_key=CUSTOM_PROVIDER_API_KEY,
     ),
-        tools=[
-            MCPTools(transport="streamable-http", url="https://mcp.context7.com/mcp"),
-            e2b_toolkit,
-            ExaTools(), 
-        ],
+        tools=code_agent_tools,
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
         instructions=""" 

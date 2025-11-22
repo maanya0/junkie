@@ -16,6 +16,7 @@ MODEL_NAME = os.getenv("CUSTOM_MODEL", "openai/gpt-oss-120b")
 SUPERMEMORY_KEY = os.getenv("SUPERMEMORY_API_KEY")
 CUSTOM_PROVIDER_API_KEY = os.getenv("CUSTOM_PROVIDER_API_KEY", None)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
 
 # Agent Configuration
 MODEL_TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0.3"))
