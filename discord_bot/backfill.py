@@ -15,12 +15,14 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
         channel_id = channel.id
         current_count = await get_message_count(channel_id)
         
+        channel_name = getattr(channel, "name", "DM")
+        
         # If we have enough messages (e.g. > 90% of target), skip backfill
         if current_count >= target_limit * 0.9:
-            logger.info(f"[Backfill] Channel {channel.name} ({channel_id}) has {current_count} messages (Target: {target_limit}). Skipping backfill.")
+            logger.info(f"[Backfill] Channel {channel_name} ({channel_id}) has {current_count} messages (Target: {target_limit}). Skipping backfill.")
             return
 
-        logger.info(f"[Backfill] Starting backfill for {channel.name} ({channel_id}). Current: {current_count}, Target: {target_limit}")
+        logger.info(f"[Backfill] Starting backfill for {channel_name} ({channel_id}). Current: {current_count}, Target: {target_limit}")
         
         # Check for existing data boundaries
         latest_id = await get_latest_message_id(channel_id)
@@ -30,7 +32,7 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
         
         if latest_id:
             # 1. Catch Up: Fetch messages newer than the latest stored message
-            logger.info(f"[Backfill] Catching up new messages for {channel.name} after ID {latest_id}")
+            logger.info(f"[Backfill] Catching up new messages for {channel_name} after ID {latest_id}")
             try:
                 # Create a dummy object for 'after' since discord.py expects a Snowflake-like object
                 after_obj = discord.Object(id=latest_id)
@@ -59,7 +61,7 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
             fetched_count = len(await fetch_and_cache_from_api(channel, limit=target_limit))
         
         new_count = await get_message_count(channel_id)
-        logger.info(f"[Backfill] Completed backfill for {channel.name} ({channel_id}). Fetched: {fetched_count}, New Total: {new_count}")
+        logger.info(f"[Backfill] Completed backfill for {channel_name} ({channel_id}). Fetched: {fetched_count}, New Total: {new_count}")
         
     except Exception as e:
         logger.error(f"[Backfill] Error backfilling channel {channel.id}: {e}")

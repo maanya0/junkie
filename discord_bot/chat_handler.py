@@ -132,7 +132,8 @@ def setup_chat(bot):
                 session_id = str(message.channel.id)
                 
                 # Log invocation
-                logger.info(f"[chatbot] Agent invoked in channel {message.channel.name} ({message.channel.id}) by user {message.author.name} ({user_id})")
+                channel_name = getattr(message.channel, "name", "DM")
+                logger.info(f"[chatbot] Agent invoked in channel {channel_name} ({message.channel.id}) by user {message.author.name} ({user_id})")
                 
                 # Set the execution context for tools
                 set_current_channel_id(message.channel.id)
