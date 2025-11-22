@@ -7,6 +7,9 @@ load_dotenv()
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 USE_REDIS = os.getenv("USE_REDIS", "false").lower() == "true"
 
+# Postgres Configuration
+POSTGRES_URL = os.getenv("POSTGRES_URL", "")
+
 # Model and Provider Configuration
 PROVIDER = os.getenv("CUSTOM_PROVIDER", "groq")  # default provider
 MODEL_NAME = os.getenv("CUSTOM_MODEL", "openai/gpt-oss-120b")

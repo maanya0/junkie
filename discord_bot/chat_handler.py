@@ -14,6 +14,10 @@ from discord_bot.context_cache import (
 )
 from core.config import TEAM_LEADER_CONTEXT_LIMIT
 from core.execution_context import set_current_channel_id, set_current_channel
+from core.database import init_db
+from discord_bot.backfill import start_backfill_task
+import asyncio
+import discord
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,17 @@ def setup_chat(bot):
     async def on_ready():
         # Ensure MCP tools are connected/initialized
         await setup_mcp()
+        
+        # Initialize Database
+        await init_db()
+        
+        # Start Backfill Task
+        # Filter for TextChannels where the bot has read permissions (implied by visibility)
+        text_channels = [
+            c for c in bot.bot.get_all_channels() 
+            if isinstance(c, discord.TextChannel)
+        ]
+        asyncio.create_task(start_backfill_task(text_channels))
 
     @bot.event
     async def on_message(message):

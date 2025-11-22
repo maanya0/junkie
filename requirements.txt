@@ -28,3 +28,4 @@ mcp
 pydantic
 uvicorn
 pytz>=2024.1
+asyncpg
