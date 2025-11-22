@@ -159,22 +159,26 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
         BACKFILL_MAX_FETCH_LIMIT = int(os.getenv("BACKFILL_MAX_FETCH_LIMIT", "1000"))
         fetch_limit = min(int(limit * 1.2), BACKFILL_MAX_FETCH_LIMIT)  # 20% buffer, capped
         
+        
         if after_message:
             # When using 'after', Discord returns oldest -> newest
             async for m in channel.history(limit=fetch_limit, after=after_message):
-                if m.content and m.content.strip():
+                # Include messages with content, attachments, or embeds
+                if m.content or m.attachments or m.embeds:
                     messages.append(m)
                     if len(messages) >= limit:
                         break
         elif before_message:
             async for m in channel.history(limit=fetch_limit, before=before_message):
-                if m.content and m.content.strip():
+                # Include messages with content, attachments, or embeds
+                if m.content or m.attachments or m.embeds:
                     messages.append(m)
                     if len(messages) >= limit:
                         break
         else:
             async for m in channel.history(limit=fetch_limit):
-                if m.content and m.content.strip():
+                # Include messages with content, attachments, or embeds
+                if m.content or m.attachments or m.embeds:
                     messages.append(m)
                     if len(messages) >= limit:
                         break
@@ -198,7 +202,7 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
                 channel_id=channel.id,
                 author_id=m.author.id,
                 author_name=m.author.display_name,
-                content=m.clean_content,
+                content=m.content or "[Image/Embed]",  # Handle messages with no text content
                 created_at=m.created_at,
                 timestamp_str=timestamp_str
             )
