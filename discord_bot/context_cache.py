@@ -196,13 +196,25 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
             timestamp_str = m.created_at.strftime("%Y-%m-%d %H:%M:%S")
             rel_time = format_message_timestamp(m.created_at, current_time)
             
+            # Build content with attachments and embeds
+            content_parts = []
+            if m.content:
+                content_parts.append(m.content)
+            if m.attachments:
+                for att in m.attachments:
+                    content_parts.append(f"[Attachment: {att.url}]")
+            if m.embeds and not m.attachments:  # Only add embeds if no attachments (avoid duplication)
+                content_parts.append(f"[Embed: {len(m.embeds)} embed(s)]")
+            
+            content = " ".join(content_parts) if content_parts else "[Empty message]"
+            
             # Store in DB
             await store_message(
                 message_id=m.id,
                 channel_id=channel.id,
                 author_id=m.author.id,
                 author_name=m.author.display_name,
-                content=m.content or "[Image/Embed]",  # Handle messages with no text content
+                content=content,
                 created_at=m.created_at,
                 timestamp_str=timestamp_str
             )
