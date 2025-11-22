@@ -14,6 +14,7 @@ from agno.tools.sleep import SleepTools
 from agno.tools.youtube import YouTubeTools
 from tools.e2b_tools import SandboxManager, E2BToolkit
 from tools.history_tools import HistoryTools
+from tools.bio_tools import BioTools
 
 from core.config import (
     REDIS_URL, USE_REDIS, PROVIDER, MODEL_NAME, SUPERMEMORY_KEY,
@@ -175,7 +176,7 @@ The E2B sandbox is a secure, isolated environment that allows you to run code an
             base_url=PROVIDER,
             api_key=CUSTOM_PROVIDER_API_KEY,
         ),
-        tools=[HistoryTools()],
+        tools=[HistoryTools(), BioTools()],
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
         instructions="""You specialize in answering questions about the chat history, users, and topics discussed.
@@ -215,6 +216,7 @@ Be precise with timestamps and attribute statements accurately to users."""
         model=model,
         db=db,
         members=agents,
+        tools=[BioTools(), CalculatorTools()],
         instructions=get_system_prompt(),   # Your main system prompt applies to the entire team
         num_history_runs=AGENT_HISTORY_RUNS,
         add_datetime_to_context=True,
