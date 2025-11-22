@@ -1,6 +1,7 @@
 from agno.tools import Toolkit
-from discord_bot.context_cache import _memory_cache, get_recent_context
+from discord_bot.context_cache import get_recent_context
 from core.execution_context import get_current_channel_id, get_current_channel
+from core.database import get_messages
 import logging
 import asyncio
 
@@ -30,14 +31,17 @@ class HistoryTools(Toolkit):
             if not channel_id:
                  return "Error: No execution context found. Cannot determine channel."
             
-            logger.warning(f"[HistoryTools] Channel object missing, falling back to cache-only for ID {channel_id}")
-            mem_entry = _memory_cache.get(channel_id)
-            if not mem_entry:
-                return "No history found in cache."
-            cached_data = list(mem_entry["data"])
-            if len(cached_data) > limit:
-                cached_data = cached_data[-limit:]
-            return "\n".join(cached_data)
+            logger.warning(f"[HistoryTools] Channel object missing, falling back to DB-only for ID {channel_id}")
+            
+            # Use DB directly
+            db_messages = await get_messages(channel_id, limit)
+            if not db_messages:
+                return "No history found in database."
+                
+            formatted = []
+            for m in db_messages:
+                formatted.append(f"{m['timestamp_str']} {m['author_name']}({m['author_id']}): {m['content']}")
+            return "\n".join(formatted)
 
         logger.info(f"[HistoryTools] Fetching history for channel {channel.id} with limit {limit}")
         
