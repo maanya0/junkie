@@ -1,7 +1,6 @@
 # main.py
 
 import os
-
 from dotenv import load_dotenv
 
 from discord_bot.chat_handler import setup_chat
