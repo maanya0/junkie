@@ -35,8 +35,10 @@ class BioTools(Toolkit):
             
             # If we can't get client from channel state (internal API), try to rely on guild
             if not client and guild:
-                 if hasattr(guild, 'me'):
-                     client = guild.me.client
+                 if hasattr(guild, '_state') and hasattr(guild._state, '_get_client'):
+                     client = guild._state._get_client()
+                 elif hasattr(guild, 'me') and hasattr(guild.me, '_state') and hasattr(guild.me._state, '_get_client'):
+                     client = guild.me._state._get_client()
             
             if not client:
                 logger.warning("[BioTools] Could not access Discord client instance.")
@@ -174,8 +176,10 @@ class BioTools(Toolkit):
             
             # If we can't get client from channel state (internal API), try to rely on guild
             if not client and guild:
-                 if hasattr(guild, 'me'):
-                     client = guild.me.client
+                 if hasattr(guild, '_state') and hasattr(guild._state, '_get_client'):
+                     client = guild._state._get_client()
+                 elif hasattr(guild, 'me') and hasattr(guild.me, '_state') and hasattr(guild.me._state, '_get_client'):
+                     client = guild.me._state._get_client()
 
             if not client:
                 logger.warning(f"[BioTools] Could not access Discord client instance. Channel type: {type(channel)}")
