@@ -191,7 +191,11 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
         
         formatted = []
         stored_count = 0
+        fetched_message_ids = set()  # Track which messages we fetched from Discord
+        
         for m in messages:
+            fetched_message_ids.add(m.id)
+            
             # Store absolute timestamp for hygiene, but use dynamic relative time for return
             timestamp_str = m.created_at.strftime("%Y-%m-%d %H:%M:%S")
             rel_time = format_message_timestamp(m.created_at, current_time)
@@ -208,7 +212,7 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
             
             content = " ".join(content_parts) if content_parts else "[Empty message]"
             
-            # Store in DB
+            # Store in DB (handles both insert and update for edits)
             await store_message(
                 message_id=m.id,
                 channel_id=channel.id,
@@ -331,19 +335,42 @@ async def append_message_to_cache(message):
 
 async def update_message_in_cache(before, after):
     """
-    Update a message in the DB.
+    Update a message in the DB when it's edited.
     """
-    # store_message handles upsert/update
-    await append_message_to_cache(after)
+    from core.database import store_message
+    from datetime import datetime, timezone
+    
+    # Build updated content with attachments
+    content_parts = []
+    if after.content:
+        content_parts.append(after.content)
+    if after.attachments:
+        for att in after.attachments:
+            content_parts.append(f"[Attachment: {att.url}]")
+    if after.embeds and not after.attachments:
+        content_parts.append(f"[Embed: {len(after.embeds)} embed(s)]")
+    
+    content = " ".join(content_parts) if content_parts else "[Empty message]"
+    timestamp_str = after.created_at.strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Update in database (store_message handles upsert)
+    await store_message(
+        message_id=after.id,
+        channel_id=after.channel.id,
+        author_id=after.author.id,
+        author_name=after.author.display_name,
+        content=content,
+        created_at=after.created_at,
+        timestamp_str=timestamp_str
+    )
 
 
 async def delete_message_from_cache(message):
     """
-    Remove a message from the DB? 
-    Actually, for history we might want to keep it or mark deleted. 
-    But for now, let's do nothing or implement delete in DB if needed.
+    Remove a message from the DB when it's deleted.
     """
-    pass # TODO: Implement delete if strict history accuracy is needed
+    from core.database import delete_message
+    await delete_message(message.id)
 
 
 async def invalidate_cache(channel_id: int):

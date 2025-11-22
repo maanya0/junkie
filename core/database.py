@@ -88,6 +88,20 @@ async def store_message(
         logger.error(f"Failed to store message {message_id}: {e}")
         raise  # Propagate error to caller instead of silently swallowing
 
+async def delete_message(message_id: int):
+    """Delete a message from the database."""
+    if not pool:
+        return
+
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                DELETE FROM messages WHERE message_id = $1
+            """, message_id)
+            logger.debug(f"Deleted message {message_id} from database")
+    except Exception as e:
+        logger.error(f"Failed to delete message {message_id}: {e}")
+
 async def get_messages(channel_id: int, limit: int = 2000) -> List[Dict]:
     """Retrieve the most recent messages for a channel in chronological order."""
     if not pool:

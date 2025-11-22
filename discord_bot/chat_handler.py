@@ -73,18 +73,27 @@ def setup_chat(bot):
         
         logger.info(f"[on_ready] Found {len(text_channels)} channels to backfill")
         
-        # Start backfill task with error handling
-        async def run_backfill():
+        # Start backfill task with error handling and post-sync
+        async def run_backfill_and_sync():
             try:
                 logger.info("[on_ready] Starting backfill task...")
                 await start_backfill_task(text_channels)
                 logger.info("[on_ready] Backfill task completed")
+                
+                # Sync recent messages to catch offline edits/deletes
+                from discord_bot.message_sync import sync_all_channels
+                import os
+                sync_limit = int(os.getenv("MESSAGE_SYNC_LIMIT", "200"))
+                logger.info(f"[on_ready] Starting post-backfill message sync (last {sync_limit} messages)...")
+                await sync_all_channels(text_channels, sync_limit=sync_limit)
+                logger.info("[on_ready] Message sync completed")
+                
             except Exception as e:
-                logger.error(f"[on_ready] Backfill task failed: {e}", exc_info=True)
+                logger.error(f"[on_ready] Backfill/sync task failed: {e}", exc_info=True)
         
-        logger.info(f"[on_ready] Creating backfill background task for {len(text_channels)} channels...")
-        asyncio.create_task(run_backfill())
-        logger.info("[on_ready] Backfill task created - running in background")
+        logger.info(f"[on_ready] Creating backfill+sync background task for {len(text_channels)} channels...")
+        asyncio.create_task(run_backfill_and_sync())
+        logger.info("[on_ready] Backfill+sync task created - running in background")
     
     @bot.event
     async def on_disconnect():
