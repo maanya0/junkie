@@ -155,7 +155,8 @@ async def get_recent_context(channel, limit: int = 500, before_message=None) -> 
 async def fetch_and_cache_from_api(channel, limit, before_message=None, after_message=None):
     """Helper to fetch from API and cache to DB."""
     try:
-        logger.info(f"[fetch_and_cache] Fetching up to {limit} messages for channel {channel.name} ({channel.id})")
+        channel_name = getattr(channel, "name", "DM")
+        logger.info(f"[fetch_and_cache] Fetching up to {limit} messages for channel {channel_name} ({channel.id})")
         messages = []
         current_time = datetime.now(timezone.utc)
         fetch_limit = int(limit * 1.5)
