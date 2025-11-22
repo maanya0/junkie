@@ -29,10 +29,10 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
             
             # If we have enough messages (e.g. > 90% of target), skip backfill
             if current_count >= target_limit * 0.9:
-                logger.info(f"[Backfill] Channel {channel_name} ({channel_id}) has {current_count} messages (Target: {target_limit}). Skipping backfill.")
+                logger.info(f"[Backfill] ✓ Channel {channel_name}: {current_count}/{target_limit} messages (≥90%). Skipping backfill.")
                 return
 
-            logger.info(f"[Backfill] Starting backfill for {channel_name} ({channel_id}). Current: {current_count}, Target: {target_limit}")
+            logger.info(f"[Backfill] ▶ Starting backfill for {channel_name}: {current_count}/{target_limit} messages")
             
             # Check for existing data boundaries
             latest_id = await get_latest_message_id(channel_id)
@@ -42,12 +42,12 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
             
             if latest_id:
                 # 1. Catch Up: Fetch messages newer than the latest stored message
-                logger.info(f"[Backfill] Catching up new messages for {channel_name} after ID {latest_id}")
+                logger.info(f"[Backfill] ↑ Catching up {channel_name} (after ID {latest_id})...")
                 try:
                     after_obj = discord.Object(id=latest_id)
                     new_messages = await fetch_and_cache_from_api(channel, limit=target_limit, after_message=after_obj)
                     fetched_count += len(new_messages)
-                    logger.info(f"[Backfill] Caught up {len(new_messages)} new messages.")
+                    logger.info(f"[Backfill] ✓ Caught up {len(new_messages)} new messages. Total: {current_count + len(new_messages)}/{target_limit}")
                 except Exception as e:
                     logger.error(f"[Backfill] Error catching up: {e}")
 
@@ -56,10 +56,11 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                 oldest_id = await get_oldest_message_id(channel_id)  # Update oldest_id
             else:
                 # No data, full fetch
-                logger.info(f"[Backfill] No existing data. Performing full fetch.")
+                logger.info(f"[Backfill] ⚡ No existing data for {channel_name}. Performing initial fetch...")
                 fetched_count = len(await fetch_and_cache_from_api(channel, limit=target_limit))
                 current_count = await get_message_count(channel_id)
                 oldest_id = await get_oldest_message_id(channel_id)  # Update oldest_id after fetch
+                logger.info(f"[Backfill] ✓ Initial fetch complete: {current_count}/{target_limit} messages")
                 
                 # If we did a full fetch and got less than limit, we are fully backfilled
                 if fetched_count < target_limit:
@@ -84,12 +85,13 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                         break
                 
                 needed = target_limit - current_count
-                logger.info(f"[Backfill] Iteration {deepen_iteration + 1}: Still need {needed} messages. Deepening history before ID {oldest_id}")
+                logger.info(f"[Backfill] ↓ {channel_name} iteration {deepen_iteration + 1}: {current_count}/{target_limit} (need {needed} more)")
                 
                 try:
                     before_obj = discord.Object(id=oldest_id)
                     old_messages = await fetch_and_cache_from_api(channel, limit=min(needed, 1000), before_message=before_obj)
                     fetched_count += len(old_messages)
+                    logger.info(f"[Backfill]   → Fetched {len(old_messages)} older messages")
                     
                     # If we fetched 0 messages, we've reached the beginning
                     if len(old_messages) == 0:
@@ -98,9 +100,13 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                         break
                     
                     # Update counters for next iteration
+                    prev_count = current_count
                     current_count = await get_message_count(channel_id)
                     oldest_id = await get_oldest_message_id(channel_id)
                     deepen_iteration += 1
+                    
+                    progress_pct = int((current_count / target_limit) * 100)
+                    logger.info(f"[Backfill]   ✓ Progress: {current_count}/{target_limit} ({progress_pct}%)")
                     
                     # Small delay to avoid hammering the API
                     if deepen_iteration < max_deepen_iterations and current_count < target_limit:
@@ -111,7 +117,8 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                     break
             
             new_count = await get_message_count(channel_id)
-            logger.info(f"[Backfill] Completed backfill for {channel_name} ({channel_id}). Fetched: {fetched_count}, New Total: {new_count}")
+            completion_pct = int((new_count / target_limit) * 100) if target_limit > 0 else 100
+            logger.info(f"[Backfill] ✓ Completed {channel_name}: {new_count}/{target_limit} ({completion_pct}%) - Fetched {fetched_count} messages this run")
             
         except Exception as e:
             logger.error(f"[Backfill] Error backfilling channel {channel_id}: {e}", exc_info=True)
@@ -147,4 +154,6 @@ async def start_backfill_task(channels):
     # Log summary
     errors = [r for r in results if isinstance(r, Exception)]
     successes = len(results) - len(errors)
-    logger.info(f"[Backfill] Completed: {successes}/{len(channels)} channels successful, {len(errors)} failed.")
+    logger.info(f"[Backfill] ═══════════════════════════════════════")
+    logger.info(f"[Backfill] Summary: {successes}/{len(channels)} channels successful, {len(errors)} failed")
+    logger.info(f"[Backfill] ═══════════════════════════════════════")
