@@ -1,4 +1,4 @@
-l# chat_handler.py
+# chat_handler.py
 import logging
 import sys
 import time
