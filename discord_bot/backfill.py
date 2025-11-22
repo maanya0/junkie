@@ -60,10 +60,12 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                 fetched_count = len(await fetch_and_cache_from_api(channel, limit=target_limit))
                 current_count = await get_message_count(channel_id)
                 oldest_id = await get_oldest_message_id(channel_id)  # Update oldest_id after fetch
-                logger.info(f"[Backfill] ✓ Initial fetch complete: {current_count}/{target_limit} messages")
+                oldest_id = await get_oldest_message_id(channel_id)  # Update oldest_id after fetch
                 
-                # If we did a full fetch and got less than limit, we are fully backfilled
-                if fetched_count < target_limit:
+                # Only mark as fully backfilled if we fetched ZERO messages (reached end of history)
+                # Don't mark just because fetched_count < target_limit (channel might have fewer than target)
+                if fetched_count == 0:
+                    logger.info(f"[Backfill] No messages fetched for {channel_name}. Marking as fully backfilled.")
                     await mark_channel_fully_backfilled(channel_id, True)
             
             # 2. Deepen: If still below target, fetch older messages iteratively
