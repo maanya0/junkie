@@ -178,7 +178,10 @@ class BioTools(Toolkit):
                      client = guild.me.client
 
             if not client:
-                logger.warning("[BioTools] Could not access Discord client instance.")
+                logger.warning(f"[BioTools] Could not access Discord client instance. Channel type: {type(channel)}")
+                logger.warning(f"[BioTools] Channel dir: {dir(channel)}")
+            else:
+                logger.info(f"[BioTools] Successfully accessed client: {client}")
 
             member = None
             if guild:
