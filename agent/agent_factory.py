@@ -78,7 +78,7 @@ def create_model(user_id: str):
 # -------------------------------------------------------------
 # Create Team For User
 # -------------------------------------------------------------
-def create_team_for_user(user_id: str):
+def create_team_for_user(user_id: str, client=None):
     """
     Create a full AI Team for a specific user.
 
@@ -176,7 +176,7 @@ The E2B sandbox is a secure, isolated environment that allows you to run code an
             base_url=PROVIDER,
             api_key=CUSTOM_PROVIDER_API_KEY,
         ),
-        tools=[HistoryTools(), BioTools()],
+        tools=[HistoryTools(), BioTools(client=client)],
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
         instructions="""You specialize in answering questions about the chat history, users, and topics discussed.
@@ -216,7 +216,7 @@ Be precise with timestamps and attribute statements accurately to users."""
         model=model,
         db=db,
         members=agents,
-        tools=[BioTools(), CalculatorTools()],
+        tools=[BioTools(client=client), CalculatorTools()],
         instructions=get_system_prompt(),   # Your main system prompt applies to the entire team
         num_history_runs=AGENT_HISTORY_RUNS,
         add_datetime_to_context=True,
@@ -239,7 +239,7 @@ from collections import OrderedDict
 _user_teams = OrderedDict()
 
 
-async def get_or_create_team(user_id: str):
+async def get_or_create_team(user_id: str, client=None):
     """
     Get existing team for a user or create a new one.
     Uses LRU eviction if cache exceeds MAX_AGENTS.
@@ -281,7 +281,7 @@ async def get_or_create_team(user_id: str):
         except Exception as e:
             logger.error(f"[TeamCache] Error during team cleanup: {e}", exc_info=True)
 
-    _, team = create_team_for_user(user_id)
+    _, team = create_team_for_user(user_id, client=client)
     _user_teams[user_id] = team
     logger.info(f"[TeamCache] Created new team for user {user_id} (cache size: {len(_user_teams)}/{MAX_AGENTS})")
 

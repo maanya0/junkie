@@ -8,8 +8,9 @@ import discord
 logger = logging.getLogger(__name__)
 
 class BioTools(Toolkit):
-    def __init__(self):
+    def __init__(self, client=None):
         super().__init__(name="bio_tools")
+        self.client = client
         self.register(self.get_user_details)
         self.register(self.get_user_avatar)
 
@@ -34,11 +35,17 @@ class BioTools(Toolkit):
             client = getattr(channel, '_state', None) and getattr(channel._state, '_get_client', lambda: None)()
             
             # If we can't get client from channel state (internal API), try to rely on guild
-            if not client and guild:
-                 if hasattr(guild, '_state') and hasattr(guild._state, '_get_client'):
-                     client = guild._state._get_client()
-                 elif hasattr(guild, 'me') and hasattr(guild.me, '_state') and hasattr(guild.me._state, '_get_client'):
-                     client = guild.me._state._get_client()
+            if not client:
+                 if self.client:
+                     client = self.client
+                 elif guild:
+                     if hasattr(guild, '_state') and hasattr(guild._state, '_get_client'):
+                         client = guild._state._get_client()
+                     elif hasattr(guild, 'me') and hasattr(guild.me, '_state') and hasattr(guild.me._state, '_get_client'):
+                         client = guild.me._state._get_client()
+                 # Try channel state directly (works for DMs too)
+                 elif hasattr(channel, '_state') and hasattr(channel._state, '_get_client'):
+                     client = channel._state._get_client()
             
             if not client:
                 logger.warning("[BioTools] Could not access Discord client instance.")
@@ -175,17 +182,20 @@ class BioTools(Toolkit):
             client = getattr(channel, '_state', None) and getattr(channel._state, '_get_client', lambda: None)()
             
             # If we can't get client from channel state (internal API), try to rely on guild
-            if not client and guild:
-                 if hasattr(guild, '_state') and hasattr(guild._state, '_get_client'):
-                     client = guild._state._get_client()
-                 elif hasattr(guild, 'me') and hasattr(guild.me, '_state') and hasattr(guild.me._state, '_get_client'):
-                     client = guild.me._state._get_client()
+            if not client:
+                 if self.client:
+                     client = self.client
+                 elif guild:
+                     if hasattr(guild, '_state') and hasattr(guild._state, '_get_client'):
+                         client = guild._state._get_client()
+                     elif hasattr(guild, 'me') and hasattr(guild.me, '_state') and hasattr(guild.me._state, '_get_client'):
+                         client = guild.me._state._get_client()
+                 # Try channel state directly (works for DMs too)
+                 elif hasattr(channel, '_state') and hasattr(channel._state, '_get_client'):
+                     client = channel._state._get_client()
 
             if not client:
-                logger.warning(f"[BioTools] Could not access Discord client instance. Channel type: {type(channel)}")
-                logger.warning(f"[BioTools] Channel dir: {dir(channel)}")
-            else:
-                logger.info(f"[BioTools] Successfully accessed client: {client}")
+                logger.warning("[BioTools] Could not access Discord client instance.")
 
             member = None
             if guild:

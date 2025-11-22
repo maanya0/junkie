@@ -22,12 +22,12 @@ import discord
 
 logger = logging.getLogger(__name__)
 
-async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images: list = None) -> str:
+async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images: list = None, client=None) -> str:
     """
     Run the user's Team with improved error handling and response validation.
     """
     # get_or_create_team returns a Team instance (or equivalent orchestrator)
-    team = await get_or_create_team(user_id)  # NOW ASYNC
+    team = await get_or_create_team(user_id, client=client)  # NOW ASYNC
     try:
         # Teams should implement async arun similar to Agents
         result = await team.arun(
@@ -174,7 +174,7 @@ def setup_chat(bot):
                 start_time = time.time()
                 try:
                     reply = await async_ask_junkie(
-                        prompt, user_id=user_id, session_id=session_id, images=images
+                        prompt, user_id=user_id, session_id=session_id, images=images, client=bot.bot
                     )
                 except Exception as e:
                     # Surface a truncated error to the user; keep details in logs
