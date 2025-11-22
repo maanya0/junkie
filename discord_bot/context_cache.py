@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict
 from dotenv import load_dotenv
 from core.database import store_message, get_messages, get_message_count
+import discord
 
 load_dotenv()
 
@@ -154,6 +155,9 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None):
             )
             
         return formatted
+    except discord.errors.Forbidden:
+        logger.warning(f"[fetch_and_cache] Missing access to channel {channel.id}. Skipping.")
+        return []
     except Exception as e:
         logger.error(f"[fetch_and_cache] Error: {e}", exc_info=True)
         return []
