@@ -24,6 +24,7 @@ async def close_db():
     global pool
     if pool:
         await pool.close()
+        pool = None
         logger.info("Database connection pool closed.")
 
 async def create_schema():
