@@ -1,9 +1,6 @@
 import os
 import logging
-from core.config import (
-    TRACING_ENABLED, PHOENIX_API_KEY, PHOENIX_ENDPOINT, PHOENIX_PROJECT_NAME,
-    LANGDB_TRACING_ENABLED, LANGDB_API_KEY, LANGDB_PROJECT_ID
-)
+from core.config import TRACING_ENABLED, PHOENIX_API_KEY, PHOENIX_ENDPOINT, PHOENIX_PROJECT_NAME
 
 _phoenix_tracer = None
 
@@ -56,25 +53,3 @@ def setup_phoenix_tracing():
         logger.error(f"Failed to initialize Phoenix tracing: {e}", exc_info=True)
         _phoenix_tracer = False
         return None
-
-def setup_langdb_tracing():
-    """Initialize LangDB tracing if enabled."""
-    if not LANGDB_TRACING_ENABLED:
-        return
-
-    if not LANGDB_API_KEY or not LANGDB_PROJECT_ID:
-        logger = logging.getLogger(__name__)
-        logger.warning("LangDB tracing enabled but API key or Project ID missing")
-        return
-
-    try:
-        from pylangdb.agno import init
-        init()
-        logger = logging.getLogger(__name__)
-        logger.info("LangDB tracing enabled")
-    except ImportError:
-        logger = logging.getLogger(__name__)
-        logger.warning("LangDB tracing requested but 'pylangdb' package not installed")
-    except Exception as e:
-        logger = logging.getLogger(__name__)
-        logger.error(f"Failed to initialize LangDB tracing: {e}", exc_info=True)
