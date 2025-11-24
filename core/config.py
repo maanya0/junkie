@@ -36,6 +36,11 @@ PHOENIX_ENDPOINT = os.getenv(
 )
 PHOENIX_PROJECT_NAME = os.getenv("PHOENIX_PROJECT_NAME", "junkie")
 
+# LangDB Configuration
+LANGDB_TRACING_ENABLED = os.getenv("LANGDB_TRACING_ENABLED", "false").lower() == "true"
+LANGDB_API_KEY = os.getenv("LANGDB_API_KEY")
+LANGDB_PROJECT_ID = os.getenv("LANGDB_PROJECT_ID")
+
 # MCP Configuration
 MCP_URLS = os.getenv("MCP_URLS", "").strip()
 
