@@ -85,10 +85,10 @@ def create_model(user_id: str):
         api_key=CUSTOM_PROVIDER_API_KEY,
     )
     
-def get_prompt():
-    prompt=prompt.format()
-    content = prompt.messages[0]['content']
-    return content
+def get_prompt() -> str:
+    """Return system prompt content pulled from Phoenix."""
+    global prompt
+    return prompt.messages[0]["content"]
     
 
 # -------------------------------------------------------------
