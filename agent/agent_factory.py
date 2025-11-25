@@ -1,5 +1,8 @@
 import os
 import logging
+from langtrace_python_sdk import langtrace  # Must precede other imports
+from langtrace_python_sdk.utils.with_root_span import with_langtrace_root_span
+
 from agno.agent import Agent
 from agno.team import Team
 from agno.db.redis import RedisDb
@@ -25,6 +28,8 @@ from core.config import (
 from agent.system_prompt import get_system_prompt
 from tools.tools_factory import get_mcp_tools
 from core.observability import setup_phoenix_tracing
+
+langtrace.init()
 
 logger = logging.getLogger(__name__)
 
