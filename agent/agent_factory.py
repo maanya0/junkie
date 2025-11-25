@@ -84,7 +84,12 @@ def create_model(user_id: str):
         base_url=PROVIDER,
         api_key=CUSTOM_PROVIDER_API_KEY,
     )
-
+    
+def get_prompt():
+    prompt=prompt.format()
+    content = prompt.messages[0]['content']
+    return content
+    
 
 # -------------------------------------------------------------
 # Create Team For User
@@ -229,7 +234,7 @@ Be precise with timestamps and attribute statements accurately to users."""
         members=agents,
         tools=[BioTools(client=client), CalculatorTools()],
         #instructions=get_system_prompt(),  # main system prompt applies team leader
-        instructions=prompt,
+        instructions=get_prompt(),
         num_history_runs=AGENT_HISTORY_RUNS,
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
