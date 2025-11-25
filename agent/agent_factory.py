@@ -1,7 +1,6 @@
 import os
 import logging
-from langtrace_python_sdk import langtrace  # Must precede other imports
-from langtrace_python_sdk.utils.with_root_span import with_langtrace_root_span
+from core.observability import setup_phoenix_tracing
 
 from agno.agent import Agent
 from agno.team import Team
@@ -27,9 +26,22 @@ from core.config import (
 )
 from agent.system_prompt import get_system_prompt
 from tools.tools_factory import get_mcp_tools
-from core.observability import setup_phoenix_tracing
+from phoenix.client import Client
 
-langtrace.init()
+# Initialize a phoenix client with your phoenix endpoint
+# By default it will read from your environment variables
+client = Client()
+
+
+# -----------------------------------
+# Initialize tracing (Phoenix)
+# -----------------------------------
+setup_phoenix_tracing()
+
+# Pulling a prompt by name
+prompt_name = "herocomp"
+prompt = client.prompts.get(prompt_identifier=prompt_name, tag="production")
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +57,6 @@ e2b_toolkit = E2BToolkit(manager, auto_create_default=False)
 # Database setup (optional Redis memory)
 # -----------------------------------
 db = RedisDb(db_url=REDIS_URL, memory_table="junkie_memories") if USE_REDIS else None
-
-
-# -----------------------------------
-# Initialize tracing (Phoenix)
-# -----------------------------------
-setup_phoenix_tracing()
 
 
 # -------------------------------------------------------------
@@ -222,7 +228,8 @@ Be precise with timestamps and attribute statements accurately to users."""
         db=db,
         members=agents,
         tools=[BioTools(client=client), CalculatorTools()],
-        instructions=get_system_prompt(),   # Your main system prompt applies to the entire team
+        #instructions=get_system_prompt(),  # main system prompt applies team leader
+        instructions=prompt,
         num_history_runs=AGENT_HISTORY_RUNS,
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
