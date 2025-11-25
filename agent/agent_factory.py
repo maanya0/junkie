@@ -88,6 +88,7 @@ def create_model(user_id: str):
 def get_prompt() -> str:
     """Return system prompt content pulled from Phoenix."""
     global prompt
+    prompt = prompt.format()
     return prompt.messages[0]["content"]
     
 
