@@ -84,12 +84,24 @@ def create_model(user_id: str):
 def get_prompt() -> str:
     """Return system prompt content pulled from Phoenix or fallback."""
     prompt_name = "herocomp"
-    fetched = client.prompts.get(prompt_identifier=prompt_name, tag="production")
-    formatted = fetched.format()
 
-    messages = getattr(formatted, "messages", [])
-    content = messages[0].get("content") if messages else None
+    try:
+        fetched = client.prompts.get(prompt_identifier=prompt_name, tag="production")
+        # Some objects have format(), some don't – handle both
+        if hasattr(fetched, "format"):
+            formatted = fetched.format()
+        else:
+            formatted = fetched
+    except Exception as e:
+        print("Phoenix prompt fetch error:", e)
+        return get_system_prompt()
 
+    # Extract messages
+    messages = getattr(formatted, "messages", None)
+    if not messages:
+        return get_system_prompt()
+
+    content = messages[0].get("content")
     return content or get_system_prompt()
     
 
