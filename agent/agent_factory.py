@@ -38,10 +38,6 @@ client = Client()
 # -----------------------------------
 setup_phoenix_tracing()
 
-# Pulling a prompt by name
-prompt_name = "herocomp"
-prompt = client.prompts.get(prompt_identifier=prompt_name, tag="production")
-
 
 logger = logging.getLogger(__name__)
 
@@ -84,12 +80,17 @@ def create_model(user_id: str):
         base_url=PROVIDER,
         api_key=CUSTOM_PROVIDER_API_KEY,
     )
-    
+     
 def get_prompt() -> str:
-    """Return system prompt content pulled from Phoenix."""
-    global prompt
-    prompt = prompt.format()
-    return prompt.messages[0]["content"]
+    """Return system prompt content pulled from Phoenix or fallback."""
+    prompt_name = "herocomp"
+    fetched = client.prompts.get(prompt_identifier=prompt_name, tag="production")
+    formatted = fetched.format()
+
+    messages = getattr(formatted, "messages", [])
+    content = messages[0].get("content") if messages else None
+
+    return content or get_system_prompt()
     
 
 # -------------------------------------------------------------
