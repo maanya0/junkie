@@ -12,7 +12,7 @@ e2b_code_interpreter
 youtube_transcript_api
 # Environment variable management
 python-dotenv>=1.0.0
-#
+
 
 # Async HTTP support (may be needed for API calls)
 aiohttp
