@@ -57,8 +57,8 @@ e2b_toolkit = E2BToolkit(manager, auto_create_default=False)
 if POSTGRES_URL:
     db = PostgresDb(
         db_url=POSTGRES_URL,
-        table_name="agent_sessions",    # Session/history storage
-        memory_table="user_memories",   # User memory storage
+        session_table="agent_sessions",  # Session/history storage
+        memory_table="user_memories",    # User memory storage
     )
     logger.info("[DB] Using PostgresDb for session & memory storage (same as context cache)")
 else:
