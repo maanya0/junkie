@@ -1,5 +1,6 @@
 import os
 import logging
+from sqlalchemy.engine import make_url
 from core.observability import setup_phoenix_tracing
 
 from agno.agent import Agent
@@ -52,11 +53,39 @@ e2b_toolkit = E2BToolkit(manager, auto_create_default=False)
 
 
 # -----------------------------------
+# Helper: Convert Postgres URL to async driver format
+# -----------------------------------
+def convert_to_async_url(db_url: str) -> str:
+    """Convert a postgresql:// URL to postgresql+asyncpg:// format for async operations."""
+    if not db_url:
+        return db_url
+    
+    # Already using async driver
+    if "+asyncpg" in db_url or "+psycopg_async" in db_url:
+        return db_url
+    
+    try:
+        parsed = make_url(db_url)
+        # Reconstruct URL with asyncpg driver
+        async_url = f"postgresql+asyncpg://{parsed.username}:{parsed.password}@{parsed.host}"
+        if parsed.port:
+            async_url += f":{parsed.port}"
+        async_url += f"/{parsed.database}"
+        if parsed.query:
+            async_url += f"?{parsed.query}"
+        return async_url
+    except Exception as e:
+        logger.warning(f"[DB] Failed to convert URL to async format: {e}, using original URL")
+        return db_url
+
+
+# -----------------------------------
 # Database setup for session & memory storage (async for better throughput)
 # -----------------------------------
 if POSTGRES_URL:
+    async_db_url = convert_to_async_url(POSTGRES_URL)
     db = AsyncPostgresDb(
-        db_url=POSTGRES_URL,
+        db_url=async_db_url,
         session_table="agent_sessions",  # Session/history storage
         memory_table="user_memories",    # User memory storage
     )
