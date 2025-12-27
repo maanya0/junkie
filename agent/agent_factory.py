@@ -4,7 +4,7 @@ from core.observability import setup_phoenix_tracing
 
 from agno.agent import Agent
 from agno.team import Team
-from agno.db.redis import RedisDb
+from agno.db.postgres import PostgresDb
 from agno.models.openai import OpenAILike
 from agno.tools.mcp import MCPTools
 
@@ -19,10 +19,11 @@ from tools.history_tools import HistoryTools
 from tools.bio_tools import BioTools
 
 from core.config import (
-    REDIS_URL, USE_REDIS, PROVIDER, MODEL_NAME, SUPERMEMORY_KEY,
+    PROVIDER, MODEL_NAME, SUPERMEMORY_KEY,
     CUSTOM_PROVIDER_API_KEY, GROQ_API_KEY, MODEL_TEMPERATURE, MODEL_TOP_P,
     AGENT_HISTORY_RUNS, AGENT_RETRIES, DEBUG_MODE, DEBUG_LEVEL, MAX_AGENTS,
-    CONTEXT_AGENT_MODEL, CONTEXT_AGENT_MAX_MESSAGES, FIRECRAWL_API_KEY
+    CONTEXT_AGENT_MODEL, CONTEXT_AGENT_MAX_MESSAGES, FIRECRAWL_API_KEY,
+    POSTGRES_URL
 )
 from agent.system_prompt import get_system_prompt
 from tools.tools_factory import get_mcp_tools
@@ -50,9 +51,19 @@ e2b_toolkit = E2BToolkit(manager, auto_create_default=False)
 
 
 # -----------------------------------
-# Database setup (optional Redis memory)
+# Database setup for session & memory storage
+# Uses same PostgresDb as context cache
 # -----------------------------------
-db = RedisDb(db_url=REDIS_URL, memory_table="junkie_memories") if USE_REDIS else None
+if POSTGRES_URL:
+    db = PostgresDb(
+        db_url=POSTGRES_URL,
+        table_name="agent_sessions",    # Session/history storage
+        memory_table="user_memories",   # User memory storage
+    )
+    logger.info("[DB] Using PostgresDb for session & memory storage (same as context cache)")
+else:
+    db = None
+    logger.warning("[DB] No POSTGRES_URL configured - sessions and memories will not persist!")
 
 
 # -------------------------------------------------------------
@@ -104,6 +115,16 @@ def get_prompt() -> str:
     content = messages[0].get("content")
     return content or get_system_prompt()
     
+
+# -----------------------------------
+# Memory Model (Groq for fast memory processing)
+# -----------------------------------
+memory_model = OpenAILike(
+    id="llama-3.1-8b-instant",
+    base_url="https://api.groq.com/openai/v1",
+    api_key=GROQ_API_KEY,
+)
+
 
 # -------------------------------------------------------------
 # Create Team For User
@@ -267,7 +288,8 @@ Be precise with timestamps and attribute statements accurately to users."""
         retries=AGENT_RETRIES,
         debug_mode=DEBUG_MODE,
         debug_level=DEBUG_LEVEL,
-        #enable_user_memories=True,
+        enable_user_memories=True,
+        memory_model=memory_model,  # Groq model for memory processing
     )
 
     return model, team
