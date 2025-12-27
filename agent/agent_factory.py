@@ -149,7 +149,7 @@ def get_prompt() -> str:
 # Memory Model (Groq for fast memory processing)
 # -----------------------------------
 memory_model = OpenAILike(
-    id="openai/gpt-oss-20b",
+    id="qwen/qwen3-32b",
     base_url="https://api.groq.com/openai/v1",
     api_key=GROQ_API_KEY,
 )
