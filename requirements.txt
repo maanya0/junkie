@@ -19,7 +19,6 @@ aiohttp
 
 serpapi
 play-lichess
-redis
 groq
 googlesearch-python
 pycountry
