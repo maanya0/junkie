@@ -13,7 +13,7 @@ youtube_transcript_api
 # Environment variable management
 python-dotenv>=1.0.0
 
-psycopg2
+psycopg2-binary
 # Async HTTP support (may be needed for API calls)
 aiohttp
 
