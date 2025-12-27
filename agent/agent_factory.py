@@ -7,6 +7,7 @@ from agno.team import Team
 from agno.db.postgres import PostgresDb
 from agno.models.openai import OpenAILike
 from agno.tools.mcp import MCPTools
+from agno.memory.manager import MemoryManager
 
 # Tool imports
 from agno.tools.calculator import CalculatorTools
@@ -123,6 +124,10 @@ memory_model = OpenAILike(
     id="llama-3.1-8b-instant",
     base_url="https://api.groq.com/openai/v1",
     api_key=GROQ_API_KEY,
+)
+memory_manager = MemoryManager(
+    model=memory_model,
+    db=db,
 )
 
 
@@ -284,12 +289,11 @@ Be precise with timestamps and attribute statements accurately to users."""
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
         markdown=True,
-        show_members_responses=True,        # Shows which agent responded
         retries=AGENT_RETRIES,
         debug_mode=DEBUG_MODE,
         debug_level=DEBUG_LEVEL,
         enable_user_memories=True,
-        memory_model=memory_model,  # Groq model for memory processing
+        memory_manager=memory_manager,  # Groq model for memory processing
     )
 
     return model, team
