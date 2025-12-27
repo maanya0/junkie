@@ -44,6 +44,25 @@ setup_phoenix_tracing()
 logger = logging.getLogger(__name__)
 
 
+# -------------------------------------------------------------
+# Local patch: cache tables to avoid duplicate SQLAlchemy definitions
+# -------------------------------------------------------------
+class CachedPostgresDb(PostgresDb):
+    def _get_table(self, table_type: str, create_table_if_not_found: bool | None = False):
+        # Reuse already loaded tables to avoid SQLAlchemy duplicate table errors
+        if table_type == "memories" and getattr(self, "memory_table", None) is not None:
+            return self.memory_table
+        if table_type == "sessions" and getattr(self, "session_table", None) is not None:
+            return self.session_table
+        if table_type == "metrics" and getattr(self, "metrics_table", None) is not None:
+            return self.metrics_table
+        if table_type == "evals" and getattr(self, "eval_table", None) is not None:
+            return self.eval_table
+        if table_type == "knowledge" and getattr(self, "knowledge_table", None) is not None:
+            return self.knowledge_table
+        return super()._get_table(table_type=table_type, create_table_if_not_found=create_table_if_not_found)
+
+
 # -----------------------------------
 # Initialize E2B Sandbox
 # -----------------------------------
@@ -56,7 +75,7 @@ e2b_toolkit = E2BToolkit(manager, auto_create_default=False)
 # Uses same PostgresDb as context cache
 # -----------------------------------
 if POSTGRES_URL:
-    db = PostgresDb(
+    db = CachedPostgresDb(
         db_url=POSTGRES_URL,
         session_table="agent_sessions",  # Session/history storage
         memory_table="user_memories",    # User memory storage
