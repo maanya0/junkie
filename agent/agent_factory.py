@@ -157,12 +157,6 @@ memory_manager = MemoryManager(
     model=memory_model,
     db=db,
 )
-culture_model = memory_model
-
-culture_manager = CultureManager(
-    db=db,
-    model=culture_model
-)
 
 
 # -------------------------------------------------------------
