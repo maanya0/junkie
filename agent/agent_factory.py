@@ -157,6 +157,12 @@ memory_manager = MemoryManager(
     model=memory_model,
     db=db,
 )
+culture_model = memory_model
+
+culture_manager = CultureManager(
+    db=db,
+    model=culture_model
+)
 
 
 # -------------------------------------------------------------
@@ -321,6 +327,8 @@ Be precise with timestamps and attribute statements accurately to users."""
         debug_mode=DEBUG_MODE,
         debug_level=DEBUG_LEVEL,
         enable_user_memories=True,
+        add_culture_to_context=True,  # Agent reads cultural knowledge
+        enable_agentic_culture=True,  # Agent-controlled culture tools 
         memory_manager=memory_manager,  # Groq model for memory processing
     )
 
