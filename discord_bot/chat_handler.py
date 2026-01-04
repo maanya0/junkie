@@ -27,17 +27,19 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images
     Run the user's Team with improved error handling and response validation.
     """
     # 1. ALWAYS get the team first
-    team = await get_or_create_team(user_id, client=client)
+ #   team = await get_or_create_team(user_id, client=client)
     
     try:
         # 2. Scope the attribution around the actual execution
         if memori:
-            with memori.attribution(entity_id=user_id, process_id="hero-team"):
+                memori.attribution(entity_id=user_id, process_id="hero-team"):
                 memori.set_session(session_id)
+                team = await get_or_create_team(user_id, client=client)
                 result = await team.arun(
                     input=user_text, user_id=user_id, session_id=session_id, images=images
                 )
         else:
+            team = await get_or_create_team(user_id, client=client)
             # Fallback if memori is disabled
             result = await team.arun(
                 input=user_text, user_id=user_id, session_id=session_id, images=images
