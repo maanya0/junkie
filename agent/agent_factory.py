@@ -1,6 +1,9 @@
 import os
 import logging
 from sqlalchemy.engine import make_url
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from memori import Memori
 from core.observability import setup_phoenix_tracing
 
 from agno.agent import Agent
@@ -79,6 +82,14 @@ def convert_to_async_url(db_url: str) -> str:
         return db_url
 
 
+def convert_to_sync_url(db_url: str) -> str:
+    """Convert a postgresql+asyncpg:// URL to standard postgresql:// format for Memori."""
+    if not db_url:
+        return db_url
+    # Remove async drivers - Memori uses psycopg2 via SQLAlchemy
+    return db_url.replace("+asyncpg", "").replace("+psycopg_async", "")
+
+
 # -----------------------------------
 # Database setup for session & memory storage (async for better throughput)
 # -----------------------------------
@@ -95,6 +106,20 @@ else:
     logger.warning("[DB] No POSTGRES_URL configured - sessions and memories will not persist!")
 
 
+# -----------------------------------
+# Memori Persistent Memory Setup
+# -----------------------------------
+if POSTGRES_URL:
+    memori_sync_url = convert_to_sync_url(POSTGRES_URL)
+    memori_engine = create_engine(memori_sync_url)
+    memori_session_factory = sessionmaker(bind=memori_engine)
+    memori = Memori(conn=memori_session_factory)
+    logger.info("[Memori] Initialized with PostgreSQL storage")
+else:
+    memori = None
+    logger.warning("[Memori] No POSTGRES_URL configured - persistent memory disabled!")
+
+
 # -------------------------------------------------------------
 # Helper: Create Model
 # -------------------------------------------------------------
@@ -102,7 +127,7 @@ def create_model(user_id: str):
     """Create a model instance for a specific user."""
     
     if PROVIDER == "groq":
-        return OpenAILike(
+        model = OpenAILike(
             id=MODEL_NAME,
             max_tokens=4096,
             temperature=MODEL_TEMPERATURE,
@@ -110,16 +135,22 @@ def create_model(user_id: str):
             base_url="https://api.groq.com/openai/v1",
             api_key=GROQ_API_KEY,
         )
-
-    # Custom provider
-    return OpenAILike(
-        id=MODEL_NAME,
-        max_tokens=4096,
-        temperature=MODEL_TEMPERATURE,
-        top_p=MODEL_TOP_P,
-        base_url=PROVIDER,
-        api_key=CUSTOM_PROVIDER_API_KEY,
-    )
+    else:
+        # Custom provider
+        model = OpenAILike(
+            id=MODEL_NAME,
+            max_tokens=4096,
+            temperature=MODEL_TEMPERATURE,
+            top_p=MODEL_TOP_P,
+            base_url=PROVIDER,
+            api_key=CUSTOM_PROVIDER_API_KEY,
+        )
+    
+    # Register model with Memori for memory interception
+    if memori:
+        memori.llm.register(openai_chat=model)
+    
+    return model
      
 def get_prompt() -> str:
     """Return system prompt content pulled from Phoenix or fallback."""
@@ -320,7 +351,7 @@ Be precise with timestamps and attribute statements accurately to users."""
         retries=AGENT_RETRIES,
         debug_mode=DEBUG_MODE,
         debug_level=DEBUG_LEVEL,
-        enable_user_memories=True,
+        #enable_user_memories=True,
         memory_manager=memory_manager,  # Groq model for memory processing
     )
 

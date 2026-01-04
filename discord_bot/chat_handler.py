@@ -5,7 +5,7 @@ import time
 from discord_bot.discord_utils import resolve_mentions, restore_mentions, correct_mentions
 from agno.media import Image
 # NOTE: updated imports to use team factory functions
-from agent.agent_factory import get_or_create_team, create_team_for_user
+from agent.agent_factory import get_or_create_team, create_team_for_user, memori
 from tools.tools_factory import setup_mcp, get_mcp_tools, MultiMCPTools
 from discord_bot.context_cache import (
     build_context_prompt,
@@ -26,6 +26,14 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images
     """
     Run the user's Team with improved error handling and response validation.
     """
+    # Set Memori attribution for this interaction
+    if memori:
+        memori.attribution(
+            entity_id=user_id,           # Discord User ID
+            process_id="hero-team",      # Static agent identifier
+        )
+        memori.set_session(session_id)   # Discord Channel ID
+    
     # get_or_create_team returns a Team instance (or equivalent orchestrator)
     team = await get_or_create_team(user_id, client=client)  # NOW ASYNC
     try:
@@ -59,6 +67,12 @@ def setup_chat(bot):
         logger.info("[on_ready] Initializing database...")
         await init_db()
         logger.info("[on_ready] Database initialized")
+        
+        # Initialize Memori schema (idempotent - safe to call multiple times)
+        if memori:
+            logger.info("[on_ready] Building Memori schema...")
+            memori.config.storage.build()
+            logger.info("[on_ready] Memori schema initialized")
         
         # Start Backfill Task
         # Filter for TextChannels, DMs, and GroupChats where the bot has read permissions
@@ -98,7 +112,14 @@ def setup_chat(bot):
     @bot.event
     async def on_disconnect():
         """Clean shutdown of database connections and resources."""
-        logger.info("[on_disconnect] Bot disconnecting, closing database pool...")
+        logger.info("[on_disconnect] Bot disconnecting...")
+        
+        # Wait for Memori's async augmentation to complete
+        if memori:
+            logger.info("[on_disconnect] Waiting for Memori augmentation to complete...")
+            memori.augmentation.wait()
+            logger.info("[on_disconnect] Memori augmentation completed")
+        
         await close_db()
 
     @bot.event

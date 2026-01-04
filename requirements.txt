@@ -1,7 +1,6 @@
 agno
 openai>=1.77.0
 arize-phoenix
-langtrace-python-sdk
 openinference-instrumentation-agno
 opentelemetry-sdk
 opentelemetry-exporter-otlp
@@ -14,6 +13,7 @@ youtube_transcript_api
 python-dotenv>=1.0.0
 
 psycopg2-binary
+memori>=3.1.0
 # Async HTTP support (may be needed for API calls)
 aiohttp
 

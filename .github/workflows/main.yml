@@ -5,12 +5,14 @@ on:
     branches:
       - main
       - team
+      - memori
     paths-ignore:
       - 'docs/**'
   pull_request:
     branches:
       - main
       - team
+      - memori
     paths-ignore:
       - 'docs/**'
 
@@ -55,6 +57,9 @@ jobs:
             
             # Generate :team ONLY when the branch is 'team'
             type=raw,value=team,enable=${{ github.ref == 'refs/heads/team' }}
+
+            # Generate :memori ONLY when the branch is 'memori'
+            type=raw,value=memori,enable=${{ github.ref == 'refs/heads/memori' }}
 
       - name: Build and push Docker image
         id: build
