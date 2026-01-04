@@ -26,35 +26,33 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images
     """
     Run the user's Team with improved error handling and response validation.
     """
-    # Set Memori attribution for this interaction
-    if memori:
-        memori.attribution(
-            entity_id=user_id,           # Discord User ID
-            process_id="hero-team",      # Static agent identifier
-        )
-        memori.set_session(session_id)   # Discord Channel ID
+    # 1. ALWAYS get the team first
+    team = await get_or_create_team(user_id, client=client)
     
-    # get_or_create_team returns a Team instance (or equivalent orchestrator)
-    team = await get_or_create_team(user_id, client=client)  # NOW ASYNC
     try:
-        # Teams should implement async arun similar to Agents
-        result = await team.arun(
-            input=user_text, user_id=user_id, session_id=session_id, images=images
-        )
+        # 2. Scope the attribution around the actual execution
+        if memori:
+            with memori.attribution(entity_id=user_id, process_id="hero-team"):
+                memori.set_session(session_id)
+                result = await team.arun(
+                    input=user_text, user_id=user_id, session_id=session_id, images=images
+                )
+        else:
+            # Fallback if memori is disabled
+            result = await team.arun(
+                input=user_text, user_id=user_id, session_id=session_id, images=images
+            )
         
-        # Basic response validation
+        # 3. Handle the result
         content = result.content if result and hasattr(result, 'content') else ""
         
-        # Ensure we have a valid response
         if not content or not content.strip():
             return "I apologize, but I couldn't generate a valid response. Please try rephrasing your question."
         
         return content
     except Exception as e:
-        # Log the error for debugging
         logger.error(f"Team error for user {user_id}: {e}", exc_info=True)
-        raise  # Re-raise to be handled by caller
-
+        raise
 
 def setup_chat(bot):
     @bot.event
