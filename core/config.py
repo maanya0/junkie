@@ -5,7 +5,7 @@ load_dotenv()
 
 # Postgres Configuration
 POSTGRES_URL = os.getenv("POSTGRES_URL", "")
-
+MEMORI_POSTGRES_URL = os.getenv("MEMORI_POSTGRES_URL", "")
 # Model and Provider Configuration
 PROVIDER = os.getenv("CUSTOM_PROVIDER", "groq")  # default provider
 MODEL_NAME = os.getenv("CUSTOM_MODEL", "openai/gpt-oss-120b")
