@@ -109,12 +109,17 @@ else:
 # -----------------------------------
 # Memori Persistent Memory Setup
 # -----------------------------------
+# Initialize Memori instance (shared across all users)
+# Attribution will be set per-user request to isolate memories
 if POSTGRES_URL:
     memori_sync_url = convert_to_sync_url(POSTGRES_URL)
     memori_engine = create_engine(memori_sync_url)
     memori_session_factory = sessionmaker(bind=memori_engine)
     memori = Memori(conn=memori_session_factory)
-    logger.info("[Memori] Initialized with PostgreSQL storage")
+    
+    # Build storage schema once at startup
+    memori.config.storage.build()
+    logger.info("[Memori] Initialized with PostgreSQL storage and schema built")
 else:
     memori = None
     logger.warning("[Memori] No POSTGRES_URL configured - persistent memory disabled!")
@@ -151,6 +156,32 @@ def create_model(user_id: str):
         memori.llm.register(openai_chat=model)
     
     return model
+
+
+def set_memori_attribution(user_id: str, session_id: str = None):
+    """
+    Set Memori attribution for a specific user.
+    This isolates memories per user when using memori.
+    
+    Args:
+        user_id: Unique Discord user ID
+        session_id: Optional session ID for the conversation
+    """
+    if not memori:
+        return
+    
+    # Set attribution to isolate memories per user
+    memori.attribution(
+        entity_id=user_id,
+        process_id="discord-bot"
+    )
+    
+    # Optionally set session if provided
+    if session_id:
+        memori.set_session(session_id)
+    
+    logger.debug(f"[Memori] Attribution set for user {user_id}")
+
      
 def get_prompt() -> str:
     """Return system prompt content pulled from Phoenix or fallback."""
@@ -196,10 +227,13 @@ memory_manager = MemoryManager(
 def create_team_for_user(user_id: str, client=None):
     """
     Create a full AI Team for a specific user.
+    Sets memori attribution to isolate memories per user.
 
     Returns:
         tuple: (model, team)
     """
+    # Set Memori attribution for this user to isolate memories
+    set_memori_attribution(user_id)
 
     model = create_model(user_id)
 

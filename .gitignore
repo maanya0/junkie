@@ -2,7 +2,7 @@
 .env
 .env.*
 !.env.sample
-
+Memori/
 # Python caches
 __pycache__/
 *.py[cod]

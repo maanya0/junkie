@@ -5,7 +5,7 @@ import time
 from discord_bot.discord_utils import resolve_mentions, restore_mentions, correct_mentions
 from agno.media import Image
 # NOTE: updated imports to use team factory functions
-from agent.agent_factory import get_or_create_team, create_team_for_user, memori
+from agent.agent_factory import get_or_create_team, create_team_for_user, memori, set_memori_attribution
 from tools.tools_factory import setup_mcp, get_mcp_tools, MultiMCPTools
 from discord_bot.context_cache import (
     build_context_prompt,
@@ -25,27 +25,22 @@ logger = logging.getLogger(__name__)
 async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images: list = None, client=None) -> str:
     """
     Run the user's Team with improved error handling and response validation.
+    Memori attribution is automatically set during team creation.
     """
-    # 1. ALWAYS get the team first
- #   team = await get_or_create_team(user_id, client=client)
-    
     try:
-        # 2. Scope the attribution around the actual execution
-        if memori:
-                memori.attribution(entity_id=user_id, process_id="hero-team"):
-                memori.set_session(session_id)
-                team = await get_or_create_team(user_id, client=client)
-                result = await team.arun(
-                    input=user_text, user_id=user_id, session_id=session_id, images=images
-                )
-        else:
-            team = await get_or_create_team(user_id, client=client)
-            # Fallback if memori is disabled
-            result = await team.arun(
-                input=user_text, user_id=user_id, session_id=session_id, images=images
-            )
+        # Get or create team (attribution is set in create_team_for_user)
+        team = await get_or_create_team(user_id, client=client)
         
-        # 3. Handle the result
+        # Set session context for this conversation
+        if memori and session_id:
+            memori.set_session(session_id)
+        
+        # Execute the team
+        result = await team.arun(
+            input=user_text, user_id=user_id, session_id=session_id, images=images
+        )
+        
+        # Handle the result
         content = result.content if result and hasattr(result, 'content') else ""
         
         if not content or not content.strip():
