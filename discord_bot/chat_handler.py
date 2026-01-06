@@ -5,7 +5,8 @@ import time
 from discord_bot.discord_utils import resolve_mentions, restore_mentions, correct_mentions
 from agno.media import Image
 # NOTE: updated imports to use team factory functions
-from agent.agent_factory import get_or_create_team, create_team_for_user, memori, set_memori_attribution
+from agent.agent_factory import get_or_create_team, create_team_for_user
+from core.honcho_service import honcho_service
 from tools.tools_factory import setup_mcp, get_mcp_tools, MultiMCPTools
 from discord_bot.context_cache import (
     build_context_prompt,
@@ -25,15 +26,10 @@ logger = logging.getLogger(__name__)
 async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images: list = None, client=None) -> str:
     """
     Run the user's Team with improved error handling and response validation.
-    Memori attribution is automatically set during team creation.
     """
     try:
-        # Get or create team (attribution is set in create_team_for_user)
+        # Get or create team
         team = await get_or_create_team(user_id, client=client)
-        
-        # Set session context for this conversation
-        if memori and session_id:
-            memori.set_session(session_id)
         
         # Execute the team
         result = await team.arun(
@@ -63,11 +59,11 @@ def setup_chat(bot):
         await init_db()
         logger.info("[on_ready] Database initialized")
         
-        # Initialize Memori schema (idempotent - safe to call multiple times)
-        if memori:
-            logger.info("[on_ready] Building Memori schema...")
-            memori.config.storage.build()
-            logger.info("[on_ready] Memori schema initialized")
+        # Log Honcho status
+        if honcho_service.is_enabled:
+            logger.info("[on_ready] Honcho service is ready for memory management")
+        else:
+            logger.warning("[on_ready] Honcho service not configured - memory features disabled")
         
         # Start Backfill Task
         # Filter for TextChannels, DMs, and GroupChats where the bot has read permissions
@@ -82,7 +78,7 @@ def setup_chat(bot):
         
         logger.info(f"[on_ready] Found {len(text_channels)} channels to backfill")
         
-        # Start backfill task with error handling and post-sync
+        # Start backfill task with error handling, post-sync, and Honcho ingestion
         async def run_backfill_and_sync():
             try:
                 logger.info("[on_ready] Starting backfill task...")
@@ -97,8 +93,15 @@ def setup_chat(bot):
                 await sync_all_channels(text_channels, sync_limit=sync_limit)
                 logger.info("[on_ready] Message sync completed")
                 
+                # Ingest DB messages to Honcho for historical context
+                if honcho_service.is_enabled:
+                    from discord_bot.honcho_ingestion import start_honcho_ingestion_task
+                    logger.info("[on_ready] Starting Honcho ingestion (DB → Honcho sync)...")
+                    await start_honcho_ingestion_task(text_channels)
+                    logger.info("[on_ready] Honcho ingestion completed")
+                
             except Exception as e:
-                logger.error(f"[on_ready] Backfill/sync task failed: {e}", exc_info=True)
+                logger.error(f"[on_ready] Backfill/sync/ingestion task failed: {e}", exc_info=True)
         
         logger.info(f"[on_ready] Creating backfill+sync background task for {len(text_channels)} channels...")
         asyncio.create_task(run_backfill_and_sync())
@@ -108,13 +111,7 @@ def setup_chat(bot):
     async def on_disconnect():
         """Clean shutdown of database connections and resources."""
         logger.info("[on_disconnect] Bot disconnecting...")
-        
-        # Wait for Memori's async augmentation to complete
-        if memori:
-            logger.info("[on_disconnect] Waiting for Memori augmentation to complete...")
-            memori.augmentation.wait()
-            logger.info("[on_disconnect] Memori augmentation completed")
-        
+        # Honcho handles cleanup automatically - no wait required
         await close_db()
 
     @bot.event
@@ -217,6 +214,42 @@ def setup_chat(bot):
             chunk_size = 1900
             for chunk in [final_reply[i:i+chunk_size] for i in range(0, len(final_reply), chunk_size)]:
                 await message.channel.send(f"**🗿 hero:**\n{chunk}")
+            
+            # Step 6: Store messages in Honcho for persistent memory
+            if honcho_service.is_enabled:
+                try:
+                    # Get/create Honcho session for this channel
+                    honcho_session = honcho_service.get_session(
+                        channel_id=session_id,
+                        metadata={
+                            "channel_name": getattr(message.channel, "name", "DM"),
+                            "channel_type": str(type(message.channel).__name__),
+                        }
+                    )
+                    
+                    # Get/create peer for the user with Discord metadata for nickname resolution
+                    author = message.author
+                    user_peer = honcho_service.get_peer(
+                        user_id=user_id,
+                        username=author.name,
+                        display_name=author.display_name,
+                        nickname=getattr(author, "nick", None),  # Server nickname if in guild
+                    )
+                    
+                    # Store both user message and bot response
+                    honcho_service.store_messages(
+                        session=honcho_session,
+                        user_message=raw_prompt,
+                        bot_response=reply,
+                        user_peer=user_peer,
+                        user_metadata={
+                            "discord_message_id": str(message.id),
+                            "has_images": len(images) > 0,
+                        },
+                    )
+                    logger.debug(f"[chatbot] Stored messages in Honcho for user {user_id}")
+                except Exception as e:
+                    logger.error(f"[chatbot] Failed to store messages in Honcho: {e}")
 
     @bot.event
     async def on_message_edit(before, after):

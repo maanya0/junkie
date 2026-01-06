@@ -1,10 +1,8 @@
 import os
 import logging
 from sqlalchemy.engine import make_url
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from memori import Memori
 from core.observability import setup_phoenix_tracing
+from core.honcho_service import honcho_service, get_honcho_context_for_prompt
 
 from agno.agent import Agent
 from agno.team import Team
@@ -22,13 +20,14 @@ from agno.tools.youtube import YouTubeTools
 from tools.e2b_tools import SandboxManager, E2BToolkit
 from tools.history_tools import HistoryTools
 from tools.bio_tools import BioTools
+from tools.honcho_tools import HonchoTools
 
 from core.config import (
     PROVIDER, MODEL_NAME,
     CUSTOM_PROVIDER_API_KEY, GROQ_API_KEY, MODEL_TEMPERATURE, MODEL_TOP_P,
     AGENT_HISTORY_RUNS, AGENT_RETRIES, DEBUG_MODE, DEBUG_LEVEL, MAX_AGENTS,
     CONTEXT_AGENT_MODEL, CONTEXT_AGENT_MAX_MESSAGES, FIRECRAWL_API_KEY,
-    POSTGRES_URL, MEMORI_POSTGRES_URL  # Added MEMORI_POSTGRES_URL
+    POSTGRES_URL,
 )
 from agent.system_prompt import get_system_prompt
 from tools.tools_factory import get_mcp_tools
@@ -74,12 +73,6 @@ def convert_to_async_url(db_url: str) -> str:
         logger.warning(f"[DB] Failed to convert URL to async format: {e}, using original URL")
         return db_url
 
-def convert_to_sync_url(db_url: str) -> str:
-    """Convert a postgresql+asyncpg:// URL to standard postgresql:// format for Memori."""
-    if not db_url:
-        return db_url
-    return db_url.replace("+asyncpg", "").replace("+psycopg_async", "")
-
 # -----------------------------------
 # Database setup for Agno session & memory storage
 # -----------------------------------
@@ -95,26 +88,11 @@ else:
     db = None
     logger.warning("[DB] No POSTGRES_URL configured - Agno sessions will not persist!")
 
-# -----------------------------------
-# Memori Persistent Memory Setup (Using separate URL)
-# -----------------------------------
-# We prioritize MEMORI_POSTGRES_URL if available, otherwise fallback to POSTGRES_URL
-memori_db_source = MEMORI_POSTGRES_URL or POSTGRES_URL
-
-if memori_db_source:
-    memori_sync_url = convert_to_sync_url(memori_db_source)
-    memori_engine = create_engine(memori_sync_url)
-    memori_session_factory = sessionmaker(bind=memori_engine)
-    memori = Memori(conn=memori_session_factory)
-    
-    # Build storage schema once at startup
-    memori.config.storage.build()
-    
-    source_label = "MEMORI_POSTGRES_URL" if MEMORI_POSTGRES_URL else "POSTGRES_URL (fallback)"
-    logger.info(f"[Memori] Initialized with {source_label} storage and schema built")
+# Log Honcho status
+if honcho_service.is_enabled:
+    logger.info("[Honcho] Service initialized and ready")
 else:
-    memori = None
-    logger.warning("[Memori] No database URL configured for Memori - persistent memory disabled!")
+    logger.warning("[Honcho] Service not configured - memory features disabled!")
 
 # -------------------------------------------------------------
 # Helper: Create Model
@@ -140,25 +118,7 @@ def create_model(user_id: str):
             api_key=CUSTOM_PROVIDER_API_KEY,
         )
     
-    if memori:
-        memori.llm.register(openai_chat=model)
-    
     return model
-
-def set_memori_attribution(user_id: str, session_id: str = None):
-    """Set Memori attribution for a specific user."""
-    if not memori:
-        return
-    
-    memori.attribution(
-        entity_id=user_id,
-        process_id="discord-bot"
-    )
-    
-    if session_id:
-        memori.set_session(session_id)
-    
-    logger.debug(f"[Memori] Attribution set for user {user_id}")
 
 def get_prompt() -> str:
     """Return system prompt content pulled from Phoenix or fallback."""
@@ -195,7 +155,6 @@ memory_manager = MemoryManager(
 # -------------------------------------------------------------
 def create_team_for_user(user_id: str, client=None):
     """Create a full AI Team for a specific user."""
-    set_memori_attribution(user_id)
     model = create_model(user_id)
 
     code_agent_tools = [
@@ -252,7 +211,7 @@ def create_team_for_user(user_id: str, client=None):
     context_qna_agent = Agent(
         id="context-qna-agent",
         name="Chat Context Q&A",
-        role="Answering questions about users based on extensive chat history",
+        role="Answering questions about users based on extensive chat history and Honcho memory",
         model=OpenAILike(
             id=CONTEXT_AGENT_MODEL,
             max_tokens=8000,
@@ -260,7 +219,7 @@ def create_team_for_user(user_id: str, client=None):
             base_url=PROVIDER,
             api_key=CUSTOM_PROVIDER_API_KEY,
         ),
-        tools=[HistoryTools(), BioTools(client=client)],
+        tools=[HistoryTools(), BioTools(client=client), HonchoTools()],
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
     )

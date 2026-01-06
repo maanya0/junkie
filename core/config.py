@@ -38,3 +38,9 @@ MCP_URLS = os.getenv("MCP_URLS", "").strip()
 CONTEXT_AGENT_MODEL = os.getenv("CONTEXT_AGENT_MODEL", "gemini-2.5-flash-lite")
 CONTEXT_AGENT_MAX_MESSAGES = int(os.getenv("CONTEXT_AGENT_MAX_MESSAGES", "50000"))
 TEAM_LEADER_CONTEXT_LIMIT = int(os.getenv("TEAM_LEADER_CONTEXT_LIMIT", "100"))
+
+# Honcho Configuration
+HONCHO_API_KEY = os.getenv("HONCHO_API_KEY", "")
+HONCHO_WORKSPACE_ID = os.getenv("HONCHO_WORKSPACE_ID", "junkie-discord-bot")
+HONCHO_ENVIRONMENT = os.getenv("HONCHO_ENVIRONMENT", "production")
+HONCHO_CONTEXT_TOKENS = int(os.getenv("HONCHO_CONTEXT_TOKENS", "2000"))

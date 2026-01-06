@@ -13,7 +13,7 @@ youtube_transcript_api
 python-dotenv>=1.0.0
 
 psycopg2-binary
-memori>=3.1.0
+honcho-ai
 # Async HTTP support (may be needed for API calls)
 aiohttp
 

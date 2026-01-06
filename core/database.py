@@ -60,6 +60,14 @@ async def create_schema():
                 is_fully_backfilled BOOLEAN DEFAULT FALSE,
                 last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
+            
+            -- Honcho sync status tracking
+            CREATE TABLE IF NOT EXISTS honcho_sync_status (
+                channel_id BIGINT PRIMARY KEY,
+                last_synced_message_id BIGINT,
+                messages_synced INT DEFAULT 0,
+                last_sync_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
         """)
         logger.info("Database schema initialized with optimized indexes.")
 
