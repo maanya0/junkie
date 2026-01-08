@@ -5,12 +5,14 @@ on:
     branches:
       - main
       - team
+      - v0
     paths-ignore:
       - 'docs/**'
   pull_request:
     branches:
       - main
       - team
+      - v0
     paths-ignore:
       - 'docs/**'
 
@@ -55,6 +57,9 @@ jobs:
             
             # Generate :team ONLY when the branch is 'team'
             type=raw,value=team,enable=${{ github.ref == 'refs/heads/team' }}
+            
+            # Generate :v0 ONLY when the branch is 'v0'
+            type=raw,value=v0,enable=${{ github.ref == 'refs/heads/v0' }}
 
       - name: Build and push Docker image
         id: build
