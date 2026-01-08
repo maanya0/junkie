@@ -19,6 +19,7 @@ from agno.tools.youtube import YouTubeTools
 from tools.e2b_tools import SandboxManager, E2BToolkit
 from tools.history_tools import HistoryTools
 from tools.bio_tools import BioTools
+from tools.trigger_tools import TriggerTools
 
 from core.config import (
     PROVIDER, MODEL_NAME,
@@ -162,7 +163,7 @@ memory_manager = MemoryManager(
 # -------------------------------------------------------------
 # Create Team For User
 # -------------------------------------------------------------
-def create_team_for_user(user_id: str, client=None):
+def create_team_for_user(user_id: str, client=None, channel_id: str = None):
     """
     Create a full AI Team for a specific user.
 
@@ -270,7 +271,7 @@ The E2B sandbox is a secure, isolated environment that allows you to run code an
             base_url=PROVIDER,
             api_key=CUSTOM_PROVIDER_API_KEY,
         ),
-        tools=[HistoryTools(), BioTools(client=client)],
+        tools=[HistoryTools(client=client), BioTools(client=client)],
         add_datetime_to_context=True,
         timezone_identifier="Asia/Kolkata",
         instructions="""You specialize in answering questions about the chat history, users, and topics discussed.
@@ -305,12 +306,18 @@ Be precise with timestamps and attribute statements accurately to users."""
     # ---------------------------------------------------------
     # Team Leader (Orchestrator)
     # ---------------------------------------------------------
+    
+    # Prepare session state
+    session_state = {"user_id": user_id}
+    if channel_id:
+        session_state["channel_id"] = channel_id
+
     team = Team(
         name="Hero Team",
         model=model,
         db=db,
         members=agents,
-        tools=[BioTools(client=client), CalculatorTools()],
+        tools=[BioTools(client=client), CalculatorTools(), TriggerTools()],
         #instructions=get_system_prompt(),  # main system prompt applies team leader
         instructions=get_prompt(),
         num_history_runs=AGENT_HISTORY_RUNS,
@@ -322,6 +329,7 @@ Be precise with timestamps and attribute statements accurately to users."""
         debug_level=DEBUG_LEVEL,
         enable_user_memories=True,
         memory_manager=memory_manager,  # Groq model for memory processing
+        session_state=session_state,
     )
 
     return model, team
@@ -334,16 +342,31 @@ from collections import OrderedDict
 _user_teams = OrderedDict()
 
 
-async def get_or_create_team(user_id: str, client=None):
+async def get_or_create_team(user_id: str, client=None, channel_id: str = None):
     """
     Get existing team for a user or create a new one.
     Uses LRU eviction if cache exceeds MAX_AGENTS.
     Implements proper resource cleanup when evicting teams.
+    
+    Updates the team's session state with current channel context.
     """
     if user_id in _user_teams:
         # Move to end (mark as recently used)
         _user_teams.move_to_end(user_id)
-        return _user_teams[user_id]
+        team = _user_teams[user_id]
+        
+        # Update session state with current channel context if changed
+        if channel_id and hasattr(team, 'session_state'):
+            # Initialize if None
+            if team.session_state is None:
+                team.session_state = {}
+            
+            # Update connection
+            if team.session_state.get("channel_id") != channel_id:
+                logger.info(f"[TeamCache] Updating channel_id for cached team: {channel_id}")
+                team.session_state["channel_id"] = channel_id
+                
+        return team
 
     # If cache full, evict oldest (least recently used) team
     if len(_user_teams) >= MAX_AGENTS:
@@ -376,7 +399,7 @@ async def get_or_create_team(user_id: str, client=None):
         except Exception as e:
             logger.error(f"[TeamCache] Error during team cleanup: {e}", exc_info=True)
 
-    _, team = create_team_for_user(user_id, client=client)
+    _, team = create_team_for_user(user_id, client=client, channel_id=channel_id)
     _user_teams[user_id] = team
     logger.info(f"[TeamCache] Created new team for user {user_id} (cache size: {len(_user_teams)}/{MAX_AGENTS})")
 

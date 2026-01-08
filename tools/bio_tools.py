@@ -1,7 +1,7 @@
 from agno.tools import Toolkit
 from agno.tools.function import ToolResult
 from agno.media import Image
-from core.execution_context import get_current_channel
+
 import logging
 import discord
 from typing import Optional, Union
@@ -103,18 +103,27 @@ class BioTools(Toolkit):
             logger.error(f"[BioTools] Error fetching user: {e}")
             return None
 
-    async def get_user_details(self, user_id: int) -> str:
+    async def get_user_details(self, agent, user_id: int) -> str:
         """
         Fetches details for a Discord user by their ID.
         Works in both guild channels and DM channels.
         
         Args:
+            agent (Agent): The agent instance.
             user_id (int): The Discord user ID to fetch details for.
             
         Returns:
             str: A formatted string containing user details (username, display name, avatar URL, etc.), or an error message.
         """
-        channel = get_current_channel()
+        channel_id = agent.session_state.get("channel_id")
+        if not channel_id:
+             return "Error: No channel context found in session state."
+
+        # Fetch channel using injected client
+        channel = None
+        if self.client:
+             channel = self.client.get_channel(int(channel_id))
+        
         if not channel:
             return "Error: No execution context found. Cannot access Discord client."
         
@@ -202,18 +211,27 @@ class BioTools(Toolkit):
         except Exception as e:
             logger.error(f"[BioTools] Error getting user details: {e}", exc_info=True)
             return f"Error fetching user details: {str(e)}"
-    async def get_user_avatar(self, user_id: int) -> ToolResult:
+    async def get_user_avatar(self, agent, user_id: int) -> ToolResult:
         """
         Fetches the avatar of a Discord user by their ID and returns it as an image for analysis.
         Works in both guild channels and DM channels.
         
         Args:
+            agent (Agent): The agent instance.
             user_id (int): The Discord user ID to fetch the avatar for.
             
         Returns:
             ToolResult: Contains the user's avatar image if found, or an error message.
         """
-        channel = get_current_channel()
+        channel_id = agent.session_state.get("channel_id")
+        if not channel_id:
+             return ToolResult(content="Error: No channel context found in session state.")
+
+        # Fetch channel using injected client
+        channel = None
+        if self.client:
+             channel = self.client.get_channel(int(channel_id))
+             
         if not channel:
             return ToolResult(content="Error: No execution context found. Cannot access Discord client.")
         

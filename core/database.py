@@ -9,15 +9,29 @@ logger = logging.getLogger(__name__)
 pool: Optional[asyncpg.Pool] = None
 
 async def init_db():
-    """Initialize the database connection pool."""
+    """Initialize the database connection pool and trigger infrastructure."""
     global pool
     try:
         pool = await asyncpg.create_pool(POSTGRES_URL)
         logger.info("Database connection pool created.")
         await create_schema()
+        
+        # Initialize trigger infrastructure
+        from core.triggers.store import init_trigger_store
+        from core.triggers.service import init_trigger_service
+        
+        trigger_store = init_trigger_store(pool)
+        init_trigger_service(trigger_store)
+        logger.info("Trigger infrastructure initialized.")
+        
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         raise
+
+
+def get_pool():
+    """Get the database connection pool."""
+    return pool
 
 async def close_db():
     """Close the database connection pool."""
@@ -60,6 +74,30 @@ async def create_schema():
                 is_fully_backfilled BOOLEAN DEFAULT FALSE,
                 last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
+            
+            -- Triggers table for scheduled tasks and reminders
+            CREATE TABLE IF NOT EXISTS triggers (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                start_time TIMESTAMP WITH TIME ZONE,
+                next_trigger TIMESTAMP WITH TIME ZONE,
+                recurrence_rule TEXT,
+                timezone TEXT NOT NULL DEFAULT 'UTC',
+                status TEXT NOT NULL DEFAULT 'active',
+                last_error TEXT,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_triggers_user_status 
+            ON triggers (user_id, status);
+            
+            CREATE INDEX IF NOT EXISTS idx_triggers_next_trigger 
+            ON triggers (next_trigger) 
+            WHERE status = 'active' AND next_trigger IS NOT NULL;
         """)
         logger.info("Database schema initialized with optimized indexes.")
 

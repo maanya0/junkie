@@ -14,8 +14,9 @@ from discord_bot.context_cache import (
     append_message_to_cache,
 )
 from core.config import TEAM_LEADER_CONTEXT_LIMIT
-from core.execution_context import set_current_channel_id, set_current_channel
+
 from core.database import init_db, close_db
+from core.triggers.scheduler import get_trigger_scheduler
 from discord_bot.backfill import start_backfill_task
 import asyncio
 import discord
@@ -27,7 +28,7 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images
     Run the user's Team with improved error handling and response validation.
     """
     # get_or_create_team returns a Team instance (or equivalent orchestrator)
-    team = await get_or_create_team(user_id, client=client)  # NOW ASYNC
+    team = await get_or_create_team(user_id, client=client, channel_id=session_id)  # NOW ASYNC
     try:
         # Teams should implement async arun similar to Agents
         result = await team.arun(
@@ -94,11 +95,21 @@ def setup_chat(bot):
         logger.info(f"[on_ready] Creating backfill+sync background task for {len(text_channels)} channels...")
         asyncio.create_task(run_backfill_and_sync())
         logger.info("[on_ready] Backfill+sync task created - running in background")
+        
+        # Start Trigger Scheduler
+        logger.info("[on_ready] Starting trigger scheduler...")
+        scheduler = get_trigger_scheduler()
+        scheduler.set_discord_client(bot.bot)
+        await scheduler.start()
+        logger.info("[on_ready] Trigger scheduler started")
     
     @bot.event
     async def on_disconnect():
         """Clean shutdown of database connections and resources."""
-        logger.info("[on_disconnect] Bot disconnecting, closing database pool...")
+        logger.info("[on_disconnect] Bot disconnecting, stopping scheduler...")
+        scheduler = get_trigger_scheduler()
+        await scheduler.stop()
+        logger.info("[on_disconnect] Closing database pool...")
         await close_db()
 
     @bot.event
@@ -167,9 +178,8 @@ def setup_chat(bot):
                 channel_name = getattr(message.channel, "name", "DM")
                 logger.info(f"[chatbot] Agent invoked in channel {channel_name} ({message.channel.id}) by user {message.author.name} ({user_id})")
                 
-                # Set the execution context for tools
-                set_current_channel_id(message.channel.id)
-                set_current_channel(message.channel)
+                # Execution context is now handled via agent session state
+
                 
                 start_time = time.time()
                 try:
