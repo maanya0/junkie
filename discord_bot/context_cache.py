@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict
 from dotenv import load_dotenv
 from core.database import store_message, get_messages, get_message_count, is_channel_fully_backfilled, mark_channel_fully_backfilled
+from core.honcho_service import honcho_service, get_honcho_context_for_prompt
 import discord
 
 load_dotenv()
@@ -295,7 +296,21 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None, repl
             f"----------------\n"
         )
 
+    # Get Honcho user context for personalization
+    user_context_str = ""
+    if honcho_service.is_enabled:
+        try:
+            user_id = str(message.author.id)
+            session_id = str(message.channel.id)
+            honcho_context = get_honcho_context_for_prompt(session_id, user_id)
+            if honcho_context:
+                user_context_str = f"<user_context>\n{honcho_context}\n</user_context>\n\n"
+                logger.debug(f"[build_context_prompt] Added Honcho user context for user {user_id}")
+        except Exception as e:
+            logger.warning(f"[build_context_prompt] Failed to get Honcho context: {e}")
+
     prompt = (
+        f"{user_context_str}"
         f"{channel_meta}"
         f"Current Time: {current_time_str}\n"
         f"Timestamps are relative to this time.\n\n"

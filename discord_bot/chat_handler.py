@@ -76,43 +76,80 @@ def setup_chat(bot):
             if c not in text_channels:
                 text_channels.append(c)
         
-        logger.info(f"[on_ready] Found {len(text_channels)} channels to backfill")
+        logger.info(f"[on_ready] Found {len(text_channels)} total channels")
         
-        # Start backfill task with error handling, post-sync, and Honcho ingestion
+        # Start backfill task with error handling, post-sync, and Honcho cold start
         async def run_backfill_and_sync():
             try:
-                logger.info("[on_ready] Starting backfill task...")
-                await start_backfill_task(text_channels)
+                import os
+                from datetime import datetime, timezone, timedelta
+                from core.database import pool
+                
+                # Filter for active channels (activity in last N days)
+                active_days = int(os.getenv("BACKFILL_ACTIVE_DAYS", "7"))
+                cutoff = datetime.now(timezone.utc) - timedelta(days=active_days)
+                
+                active_channels = []
+                inactive_channels = []
+                
+                for channel in text_channels:
+                    try:
+                        # Check if channel has recent messages in DB
+                        if pool:
+                            async with pool.acquire() as conn:
+                                has_recent = await conn.fetchval("""
+                                    SELECT EXISTS(
+                                        SELECT 1 FROM messages 
+                                        WHERE channel_id = $1 AND created_at > $2
+                                        LIMIT 1
+                                    )
+                                """, channel.id, cutoff)
+                                if has_recent:
+                                    active_channels.append(channel)
+                                else:
+                                    inactive_channels.append(channel)
+                        else:
+                            active_channels.append(channel)  # Include if we can't check
+                    except Exception as e:
+                        logger.debug(f"[on_ready] Error checking channel activity: {e}")
+                        active_channels.append(channel)
+                
+                logger.info(f"[on_ready] Channel priority: {len(active_channels)} active (last {active_days} days), {len(inactive_channels)} inactive")
+                
+                # Only backfill active channels
+                logger.info(f"[on_ready] Starting backfill for {len(active_channels)} active channels...")
+                await start_backfill_task(active_channels)
                 logger.info("[on_ready] Backfill task completed")
                 
-                # Sync recent messages to catch offline edits/deletes
+                # Sync recent messages only for active channels
                 from discord_bot.message_sync import sync_all_channels
-                import os
-                sync_limit = int(os.getenv("MESSAGE_SYNC_LIMIT", "200"))
-                logger.info(f"[on_ready] Starting post-backfill message sync (last {sync_limit} messages)...")
-                await sync_all_channels(text_channels, sync_limit=sync_limit)
+                sync_limit = int(os.getenv("MESSAGE_SYNC_LIMIT", "100"))
+                logger.info(f"[on_ready] Starting message sync for {len(active_channels)} active channels (last {sync_limit} messages)...")
+                await sync_all_channels(active_channels, sync_limit=sync_limit)
                 logger.info("[on_ready] Message sync completed")
                 
-                # Ingest DB messages to Honcho for historical context
+                # Production cold start: Quick sync to Honcho + background deep sync
                 if honcho_service.is_enabled:
-                    from discord_bot.honcho_ingestion import start_honcho_ingestion_task
-                    logger.info("[on_ready] Starting Honcho ingestion (DB → Honcho sync)...")
-                    await start_honcho_ingestion_task(text_channels)
-                    logger.info("[on_ready] Honcho ingestion completed")
+                    from discord_bot.cold_start import run_cold_start_sync
+                    logger.info("[on_ready] Starting Honcho cold start sync...")
+                    await run_cold_start_sync(active_channels)
+                    logger.info("[on_ready] Honcho cold start sync completed")
                 
             except Exception as e:
-                logger.error(f"[on_ready] Backfill/sync/ingestion task failed: {e}", exc_info=True)
+                logger.error(f"[on_ready] Backfill/sync/cold_start task failed: {e}", exc_info=True)
         
-        logger.info(f"[on_ready] Creating backfill+sync background task for {len(text_channels)} channels...")
+        logger.info(f"[on_ready] Creating backfill+sync background task...")
         asyncio.create_task(run_backfill_and_sync())
         logger.info("[on_ready] Backfill+sync task created - running in background")
     
     @bot.event
     async def on_disconnect():
-        """Clean shutdown of database connections and resources."""
-        logger.info("[on_disconnect] Bot disconnecting...")
-        # Honcho handles cleanup automatically - no wait required
-        await close_db()
+        """Handle disconnection events - note: this fires for temporary gateway disconnects too."""
+        # Note: Do NOT close the database pool here!
+        # on_disconnect fires during temporary gateway reconnects, not just shutdown.
+        # The pool should remain open for background tasks.
+        # Cleanup happens when the bot process actually terminates.
+        logger.info("[on_disconnect] Bot disconnected (gateway may reconnect)")
 
     @bot.event
     async def on_message(message):
@@ -236,7 +273,8 @@ def setup_chat(bot):
                         nickname=getattr(author, "nick", None),  # Server nickname if in guild
                     )
                     
-                    # Store both user message and bot response
+                    # Store both user message and bot response with timestamps
+                    from datetime import datetime, timezone
                     honcho_service.store_messages(
                         session=honcho_session,
                         user_message=raw_prompt,
@@ -246,6 +284,8 @@ def setup_chat(bot):
                             "discord_message_id": str(message.id),
                             "has_images": len(images) > 0,
                         },
+                        user_created_at=message.created_at.isoformat(),
+                        bot_created_at=datetime.now(timezone.utc).isoformat(),
                     )
                     logger.debug(f"[chatbot] Stored messages in Honcho for user {user_id}")
                 except Exception as e:

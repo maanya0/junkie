@@ -182,6 +182,8 @@ class HonchoService:
         user_peer,
         user_metadata: Dict[str, Any] = None,
         bot_metadata: Dict[str, Any] = None,
+        user_created_at: str = None,
+        bot_created_at: str = None,
     ):
         """
         Store a user message and bot response in Honcho.
@@ -193,6 +195,8 @@ class HonchoService:
             user_peer: The user's Peer object
             user_metadata: Optional metadata for user message
             bot_metadata: Optional metadata for bot response
+            user_created_at: ISO timestamp for user message (preserves timeline)
+            bot_created_at: ISO timestamp for bot response (preserves timeline)
         """
         if not self.is_enabled or not session or not user_peer:
             return
@@ -200,14 +204,20 @@ class HonchoService:
         try:
             messages = []
             
-            # User message
-            user_msg = user_peer.message(user_message)
+            # User message with optional timestamp
+            if user_created_at:
+                user_msg = user_peer.message(user_message, created_at=user_created_at)
+            else:
+                user_msg = user_peer.message(user_message)
             if user_metadata:
                 user_msg.metadata = user_metadata
             messages.append(user_msg)
             
-            # Bot response
-            bot_msg = self._assistant.message(bot_response)
+            # Bot response with optional timestamp
+            if bot_created_at:
+                bot_msg = self._assistant.message(bot_response, created_at=bot_created_at)
+            else:
+                bot_msg = self._assistant.message(bot_response)
             if bot_metadata:
                 bot_msg.metadata = bot_metadata
             messages.append(bot_msg)
@@ -380,7 +390,7 @@ def get_honcho_context_for_prompt(session_id: str, user_id: str) -> str:
     
     # Get user representation/insights
     try:
-        peer = honcho_service.client.peer(id=user_id)
+        peer = honcho_service.client.peer(user_id)
         context = peer.get_context()
         if context:
             parts.append(f"## User Profile\n{context}")

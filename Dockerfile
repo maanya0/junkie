@@ -29,9 +29,6 @@ WORKDIR /app
 # Copy the installed Python environment from builder
 COPY --from=builder /usr/local /usr/local
 
-# Memori setup
-RUN python -m memori setup
-
 # Copy the app code
 COPY . .
 

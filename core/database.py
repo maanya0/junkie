@@ -1,4 +1,5 @@
 import asyncpg
+import asyncio
 import logging
 from typing import List, Optional, Dict
 from datetime import datetime
@@ -12,9 +13,13 @@ async def init_db():
     """Initialize the database connection pool."""
     global pool
     try:
-        pool = await asyncpg.create_pool(POSTGRES_URL)
+        # Wait max 10s for DB connection
+        pool = await asyncio.wait_for(asyncpg.create_pool(POSTGRES_URL), timeout=10.0)
         logger.info("Database connection pool created.")
         await create_schema()
+    except asyncio.TimeoutError:
+        logger.error("Database connection timed out! Check your POSTGRES_URL and network connection.")
+        raise
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         raise
