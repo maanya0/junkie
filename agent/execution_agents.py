@@ -106,8 +106,8 @@ async def execute_with_agent(user_id: str, agent_id: str, instructions: str) -> 
     from agent.agent_factory import db
     
     model = OpenAILike(
-        id="gpt-4.1-mini",
-        max_tokens=2048,
+        id="openai/gpt-oss-120b",
+        max_tokens=7000,
         temperature=0.3,
         base_url=PROVIDER,
         api_key=CUSTOM_PROVIDER_API_KEY,
