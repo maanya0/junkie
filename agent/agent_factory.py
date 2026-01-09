@@ -23,7 +23,7 @@ from tools.trigger_tools import TriggerTools
 from tools.image_tools import ImageTools
 from tools.knowledge_tools import create_knowledge_tools, KnowledgeIngestTools
 from core.knowledge import get_knowledge_base
-from agno.skills import Skills, LocalSkills
+# NOTE: Skills is Agent-only, not used in Team
 
 from core.config import (
     PROVIDER, MODEL_NAME,
@@ -335,7 +335,7 @@ Be precise with timestamps and attribute statements accurately to users."""
         knowledge=knowledge,
         search_knowledge=knowledge is not None,
         enable_agentic_knowledge_filters=knowledge is not None,
-        skills=Skills(loaders=[LocalSkills("skills/")]),
+        # NOTE: skills= removed - Skills is Agent-only, not available for Team
         instructions=get_prompt(),
         num_history_runs=AGENT_HISTORY_RUNS,
         add_datetime_to_context=True,

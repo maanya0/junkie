@@ -18,9 +18,9 @@ def create_knowledge_tools() -> KnowledgeTools | None:
     
     return KnowledgeTools(
         knowledge=kb,
-        think=True,      # Plan search queries
-        search=True,     # Execute searches
-        analyze=True,    # Evaluate results
+        enable_think=True,      # Plan search queries
+        enable_search=True,     # Execute searches
+        enable_analyze=True,    # Evaluate results
         add_few_shot=True,
     )
 
