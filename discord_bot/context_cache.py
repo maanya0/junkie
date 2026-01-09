@@ -316,10 +316,20 @@ async def append_message_to_cache(message):
     """
     Append a new message to the DB.
     """
-    if not message.content.strip():
-        return
+    # Build content with attachments and embeds (consistent with fetch_and_cache_from_api)
+    content_parts = []
+    if message.content:
+        content_parts.append(message.content)
+    if message.attachments:
+        for att in message.attachments:
+            content_parts.append(f"[Attachment: {att.url}]")
+    if message.embeds and not message.attachments:
+        content_parts.append(f"[Embed: {len(message.embeds)} embed(s)]")
+    
+    content = " ".join(content_parts) if content_parts else ""
+    if not content.strip():
+        return  # Skip empty messages
 
-    current_time = datetime.now(timezone.utc)
     timestamp_str = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
     
     await store_message(
@@ -327,7 +337,7 @@ async def append_message_to_cache(message):
         channel_id=message.channel.id,
         author_id=message.author.id,
         author_name=message.author.display_name,
-        content=message.clean_content,
+        content=content,
         created_at=message.created_at,
         timestamp_str=timestamp_str
     )

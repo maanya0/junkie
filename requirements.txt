@@ -33,3 +33,10 @@ asyncpg
 # Trigger/scheduler system dependencies
 python-dateutil>=2.8.2
 dateparser>=1.2.0
+
+# Knowledge Base dependencies
+pgvector
+pypdf
+mistralai
+psycopg[binary]
+sqlalchemy

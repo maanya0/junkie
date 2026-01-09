@@ -118,6 +118,12 @@ async def execute_with_agent(user_id: str, agent_id: str, instructions: str) -> 
         name=f"Execution Agent ({agent_id})",
         model=model,
         db=db,
+        session_state={
+            "tasks": [],
+            "is_completed": False,
+        },
+        enable_agentic_state=True,
+        add_session_state_to_context=True,
         instructions=EXECUTION_AGENT_PROMPT,
         user_id=user_id,
         session_id=f"exec-{user_id}-{agent_id}",

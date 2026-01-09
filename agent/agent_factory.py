@@ -20,6 +20,10 @@ from tools.e2b_tools import SandboxManager, E2BToolkit
 from tools.history_tools import HistoryTools
 from tools.bio_tools import BioTools
 from tools.trigger_tools import TriggerTools
+from tools.image_tools import ImageTools
+from tools.knowledge_tools import create_knowledge_tools, KnowledgeIngestTools
+from core.knowledge import get_knowledge_base
+from agno.skills import Skills, LocalSkills
 
 from core.config import (
     PROVIDER, MODEL_NAME,
@@ -312,13 +316,26 @@ Be precise with timestamps and attribute statements accurately to users."""
     if channel_id:
         session_state["channel_id"] = channel_id
 
+    # Build tools list with knowledge tools if available
+    team_tools = [BioTools(client=client), CalculatorTools(), TriggerTools(), ImageTools()]
+    knowledge_tools = create_knowledge_tools()
+    if knowledge_tools:
+        team_tools.append(knowledge_tools)
+        team_tools.append(KnowledgeIngestTools())
+    
+    # Get knowledge base (may be None if not configured)
+    knowledge = get_knowledge_base()
+    
     team = Team(
         name="Hero Team",
         model=model,
         db=db,
         members=agents,
-        tools=[BioTools(client=client), CalculatorTools(), TriggerTools()],
-        #instructions=get_system_prompt(),  # main system prompt applies team leader
+        tools=team_tools,
+        knowledge=knowledge,
+        search_knowledge=knowledge is not None,
+        enable_agentic_knowledge_filters=knowledge is not None,
+        skills=Skills(loaders=[LocalSkills("skills/")]),
         instructions=get_prompt(),
         num_history_runs=AGENT_HISTORY_RUNS,
         add_datetime_to_context=True,
@@ -327,8 +344,8 @@ Be precise with timestamps and attribute statements accurately to users."""
         retries=AGENT_RETRIES,
         debug_mode=DEBUG_MODE,
         debug_level=DEBUG_LEVEL,
-        enable_user_memories=True,
-        memory_manager=memory_manager,  # Groq model for memory processing
+        enable_agentic_memory=True,
+        memory_manager=memory_manager,
         session_state=session_state,
     )
 

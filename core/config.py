@@ -6,6 +6,9 @@ load_dotenv()
 # Postgres Configuration
 POSTGRES_URL = os.getenv("POSTGRES_URL", "")
 
+# Mistral API Key (for knowledge embeddings)
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
+
 # Model and Provider Configuration
 PROVIDER = os.getenv("CUSTOM_PROVIDER", "groq")  # default provider
 MODEL_NAME = os.getenv("CUSTOM_MODEL", "openai/gpt-oss-120b")

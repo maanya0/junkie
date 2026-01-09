@@ -47,6 +47,7 @@ async def create_schema():
         return
     
     async with pool.acquire() as conn:
+        # Create tables if they don't exist (base schema)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 message_id BIGINT PRIMARY KEY,
@@ -58,17 +59,6 @@ async def create_schema():
                 timestamp_str TEXT NOT NULL
             );
             
-            -- Optimized index for fetching recent messages (DESC order)
-            CREATE INDEX IF NOT EXISTS idx_messages_channel_created
-            ON messages (channel_id, created_at DESC);
-            
-            -- Index for message_id lookups (upserts)
-            CREATE INDEX IF NOT EXISTS idx_messages_message_id
-            ON messages (message_id);
-            
-            -- Drop old ASC index if it exists
-            DROP INDEX IF EXISTS idx_messages_channel_created_asc;
-
             CREATE TABLE IF NOT EXISTS channel_status (
                 channel_id BIGINT PRIMARY KEY,
                 is_fully_backfilled BOOLEAN DEFAULT FALSE,
@@ -91,15 +81,57 @@ async def create_schema():
                 created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
             );
-            
-            CREATE INDEX IF NOT EXISTS idx_triggers_user_status 
-            ON triggers (user_id, status);
-            
-            CREATE INDEX IF NOT EXISTS idx_triggers_next_trigger 
-            ON triggers (next_trigger) 
-            WHERE status = 'active' AND next_trigger IS NOT NULL;
         """)
-        logger.info("Database schema initialized with optimized indexes.")
+        
+        # Add new columns to existing tables (migration for smart sync)
+        # These use IF NOT EXISTS pattern for safe migration
+        migration_queries = [
+            # Add content_hash column to messages
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS content_hash TEXT",
+            # Add sync tracking columns to channel_status
+            "ALTER TABLE channel_status ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE channel_status ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMP WITH TIME ZONE",
+        ]
+        
+        for query in migration_queries:
+            try:
+                await conn.execute(query)
+            except Exception as e:
+                # Column might already exist or other non-critical error
+                logger.debug(f"Migration query note: {e}")
+        
+        # Create indexes INDIVIDUALLY (each can reference new columns safely now)
+        index_queries = [
+            # Basic indexes
+            "CREATE INDEX IF NOT EXISTS idx_messages_channel_created ON messages (channel_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages (message_id)",
+            # Hash-based change detection index (depends on content_hash column)
+            "CREATE INDEX IF NOT EXISTS idx_messages_channel_hash ON messages (channel_id, message_id, content_hash)",
+            # Drop old ASC index
+            "DROP INDEX IF EXISTS idx_messages_channel_created_asc",
+            # Activity ordering index
+            "CREATE INDEX IF NOT EXISTS idx_channel_status_activity ON channel_status (last_message_at DESC NULLS LAST)",
+            # Trigger indexes
+            "CREATE INDEX IF NOT EXISTS idx_triggers_user_status ON triggers (user_id, status)",
+        ]
+        
+        for query in index_queries:
+            try:
+                await conn.execute(query)
+            except Exception as e:
+                logger.debug(f"Index creation note: {e}")
+        
+        # Partial index needs special handling
+        try:
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_triggers_next_trigger 
+                ON triggers (next_trigger) 
+                WHERE status = 'active' AND next_trigger IS NOT NULL
+            """)
+        except Exception as e:
+            logger.debug(f"Partial index creation note: {e}")
+        
+        logger.info("Database schema initialized with smart sync support.")
 
 async def store_message(
     message_id: int,
@@ -239,3 +271,156 @@ async def mark_channel_fully_backfilled(channel_id: int, status: bool = True):
             """, channel_id, status)
     except Exception as e:
         logger.error(f"Failed to mark backfill status for {channel_id}: {e}")
+
+
+# ──────────────────────────────────────────────
+# Smart Sync Support Functions
+# ──────────────────────────────────────────────
+
+async def get_message_hashes(channel_id: int, message_ids: List[int]) -> Dict[int, str]:
+    """Get content hashes for specific messages in a channel."""
+    if not pool or not message_ids:
+        return {}
+    
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT message_id, content_hash FROM messages 
+                WHERE channel_id = $1 AND message_id = ANY($2)
+            """, channel_id, message_ids)
+            return {row['message_id']: row['content_hash'] for row in rows if row['content_hash']}
+    except Exception as e:
+        logger.error(f"Failed to get message hashes for channel {channel_id}: {e}")
+        return {}
+
+
+async def batch_store_messages(messages: List[Dict]) -> int:
+    """
+    Batch store/update multiple messages efficiently.
+    
+    Each message dict should have:
+        message_id, channel_id, author_id, author_name, content, 
+        content_hash, created_at, timestamp_str
+    
+    Returns the number of messages stored.
+    """
+    if not pool or not messages:
+        return 0
+    
+    try:
+        async with pool.acquire() as conn:
+            # Prepare data for batch insert
+            values = [
+                (
+                    m['message_id'], m['channel_id'], m['author_id'], 
+                    m['author_name'], m['content'], m.get('content_hash'),
+                    m['created_at'], m['timestamp_str']
+                )
+                for m in messages
+            ]
+            
+            # Use executemany for batch operation with upsert
+            await conn.executemany("""
+                INSERT INTO messages (message_id, channel_id, author_id, author_name, content, content_hash, created_at, timestamp_str)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (message_id) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    content_hash = EXCLUDED.content_hash,
+                    timestamp_str = EXCLUDED.timestamp_str;
+            """, values)
+            
+            return len(values)
+    except Exception as e:
+        logger.error(f"Failed to batch store messages: {e}")
+        return 0
+
+
+async def batch_delete_messages(message_ids: List[int]) -> int:
+    """Batch delete multiple messages efficiently."""
+    if not pool or not message_ids:
+        return 0
+    
+    try:
+        async with pool.acquire() as conn:
+            result = await conn.execute("""
+                DELETE FROM messages WHERE message_id = ANY($1)
+            """, message_ids)
+            # Extract count from result string like "DELETE 5"
+            count = int(result.split()[-1]) if result else 0
+            logger.debug(f"Batch deleted {count} messages")
+            return count
+    except Exception as e:
+        logger.error(f"Failed to batch delete messages: {e}")
+        return 0
+
+
+async def get_channel_last_sync(channel_id: int) -> Optional[datetime]:
+    """Get the last sync timestamp for a channel."""
+    if not pool:
+        return None
+    
+    try:
+        async with pool.acquire() as conn:
+            return await conn.fetchval("""
+                SELECT last_synced_at FROM channel_status WHERE channel_id = $1
+            """, channel_id)
+    except Exception as e:
+        logger.error(f"Failed to get last sync for channel {channel_id}: {e}")
+        return None
+
+
+async def update_channel_sync_status(channel_id: int, last_synced_at: datetime, last_message_at: datetime = None):
+    """Update channel sync status after a sync operation."""
+    if not pool:
+        return
+    
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO channel_status (channel_id, last_synced_at, last_message_at, last_updated)
+                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                ON CONFLICT (channel_id) DO UPDATE SET
+                    last_synced_at = EXCLUDED.last_synced_at,
+                    last_message_at = COALESCE(EXCLUDED.last_message_at, channel_status.last_message_at),
+                    last_updated = EXCLUDED.last_updated;
+            """, channel_id, last_synced_at, last_message_at)
+    except Exception as e:
+        logger.error(f"Failed to update sync status for channel {channel_id}: {e}")
+
+
+async def get_channels_by_activity() -> List[Dict]:
+    """Get all channels ordered by recent activity (most active first)."""
+    if not pool:
+        return []
+    
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT channel_id, last_synced_at, last_message_at, is_fully_backfilled
+                FROM channel_status 
+                ORDER BY last_message_at DESC NULLS LAST
+            """)
+            return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Failed to get channels by activity: {e}")
+        return []
+
+
+async def get_db_message_ids(channel_id: int, limit: int = 500) -> set:
+    """Get message IDs from database for a channel (for deletion detection)."""
+    if not pool:
+        return set()
+    
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT message_id FROM messages 
+                WHERE channel_id = $1 
+                ORDER BY created_at DESC 
+                LIMIT $2
+            """, channel_id, limit)
+            return {row['message_id'] for row in rows}
+    except Exception as e:
+        logger.error(f"Failed to get message IDs for channel {channel_id}: {e}")
+        return set()
+

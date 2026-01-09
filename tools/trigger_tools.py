@@ -21,12 +21,44 @@ class TriggerTools(Toolkit):
         self.register(self.schedule_task)
         self.register(self.list_reminders)
         self.register(self.cancel_reminder)
+
+    def _get_context(self, agent=None, team=None, user_id=None, session_state=None):
+        """Helper to extract user_id and channel_id from various injection candidates.
+        Agno can inject agent, team, user_id, or session_state depending on the run context.
+        """
+        # 1. Resolve session_state (prioritize injected, then agent/team)
+        res_session_state = session_state
+        if not res_session_state and agent:
+            res_session_state = getattr(agent, "session_state", None)
+        if not res_session_state and team:
+            res_session_state = getattr(team, "session_state", None)
+            
+        if not res_session_state:
+            res_session_state = {}
+
+        # 2. Resolve user_id
+        res_user_id = user_id
+        if not res_user_id:
+            # Try to get from session_state first as it's often the most reliable source in Agno
+            res_user_id = res_session_state.get("user_id")
+        if not res_user_id and agent:
+            res_user_id = getattr(agent, "user_id", None)
+        if not res_user_id and team:
+            res_user_id = getattr(team, "user_id", None)
+            
+        # 3. Resolve channel_id
+        res_channel_id = res_session_state.get("channel_id")
+        
+        return res_user_id, res_channel_id
     
     async def create_reminder(
         self,
-        agent: Agent,
         message: str,
         when: str,
+        agent=None,
+        team=None,
+        user_id=None,
+        session_state=None,
         recurring: Optional[str] = None,
     ) -> str:
         """Create a scheduled reminder that will be sent at the specified time.
@@ -49,14 +81,10 @@ class TriggerTools(Toolkit):
         """
         from core.triggers.service import get_trigger_service
         
-        user_id = agent.user_id
-        # For now, we assume channel_id is passed in session_state or we rely on the implementation 
-        # to handle channel routing. 
-        # Ideally, session_state would have channel_id if set contextually.
-        # Let's check session_state for channel_id
-        channel_id = agent.session_state.get("channel_id")
+        target_user_id, channel_id = self._get_context(agent, team, user_id, session_state)
         
-        if not user_id or not channel_id:
+        if not target_user_id or not channel_id:
+            logger.error(f"Context missing: user_id={target_user_id}, channel_id={channel_id}")
             return "Error: User or channel context not available. Cannot create reminder."
         
         service = get_trigger_service()
@@ -65,7 +93,7 @@ class TriggerTools(Toolkit):
         
         try:
             trigger = await service.create_trigger(
-                user_id=user_id,
+                user_id=target_user_id,
                 channel_id=str(channel_id),
                 payload=message,
                 agent_id="reminder",
@@ -92,10 +120,13 @@ class TriggerTools(Toolkit):
     
     async def schedule_task(
         self,
-        agent: Agent,
         task_description: str,
         when: str,
         task_type: str = "task",
+        agent=None,
+        team=None,
+        user_id=None,
+        session_state=None,
         recurring: Optional[str] = None,
     ) -> str:
         """Schedule a complex task to run at a specific time using the full AI Team.
@@ -131,10 +162,10 @@ class TriggerTools(Toolkit):
         """
         from core.triggers.service import get_trigger_service
         
-        user_id = agent.user_id
-        channel_id = agent.session_state.get("channel_id")
+        target_user_id, channel_id = self._get_context(agent, team, user_id, session_state)
         
-        if not user_id or not channel_id:
+        if not target_user_id or not channel_id:
+            logger.error(f"Context missing: user_id={target_user_id}, channel_id={channel_id}")
             return "Error: User or channel context not available. Cannot schedule task."
         
         service = get_trigger_service()
@@ -148,7 +179,7 @@ class TriggerTools(Toolkit):
         
         try:
             trigger = await service.create_trigger(
-                user_id=user_id,
+                user_id=target_user_id,
                 channel_id=str(channel_id),
                 payload=task_description,
                 agent_id=task_type,  # This determines how execution happens
@@ -176,7 +207,13 @@ class TriggerTools(Toolkit):
             logger.exception(f"Failed to schedule task: {e}")
             return f"Error: Failed to schedule task - {str(e)}"
     
-    async def list_reminders(self, agent: Agent) -> str:
+    async def list_reminders(
+        self,
+        agent=None,
+        team=None,
+        user_id=None,
+        session_state=None
+    ) -> str:
         """List all active reminders for the current user.
         
         Args:
@@ -187,9 +224,9 @@ class TriggerTools(Toolkit):
         """
         from core.triggers.service import get_trigger_service
         
-        user_id = agent.user_id
+        target_user_id, _ = self._get_context(agent, team, user_id, session_state)
         
-        if not user_id:
+        if not target_user_id:
             return "Error: User context not available. Cannot list reminders."
         
         service = get_trigger_service()
@@ -197,7 +234,7 @@ class TriggerTools(Toolkit):
             return "Error: Trigger service not available."
         
         try:
-            triggers = await service.list_triggers(user_id)
+            triggers = await service.list_triggers(target_user_id)
             
             if not triggers:
                 return "You have no active reminders."
@@ -226,7 +263,14 @@ class TriggerTools(Toolkit):
             logger.exception(f"Failed to list reminders: {e}")
             return f"Error: Failed to list reminders - {str(e)}"
     
-    async def cancel_reminder(self, agent: Agent, reminder_id: int) -> str:
+    async def cancel_reminder(
+        self,
+        reminder_id: int,
+        agent=None,
+        team=None,
+        user_id=None,
+        session_state=None
+    ) -> str:
         """Cancel and delete a reminder.
         
         Args:
@@ -238,9 +282,9 @@ class TriggerTools(Toolkit):
         """
         from core.triggers.service import get_trigger_service
         
-        user_id = agent.user_id
+        target_user_id, _ = self._get_context(agent, team, user_id, session_state)
         
-        if not user_id:
+        if not target_user_id:
             return "Error: User context not available. Cannot cancel reminder."
         
         service = get_trigger_service()
@@ -248,7 +292,7 @@ class TriggerTools(Toolkit):
             return "Error: Trigger service not available."
         
         try:
-            deleted = await service.delete_trigger(reminder_id, user_id)
+            deleted = await service.delete_trigger(reminder_id, target_user_id)
             
             if deleted:
                 return f"✅ Reminder {reminder_id} has been cancelled."
