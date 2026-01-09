@@ -288,12 +288,22 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None, repl
         reply_ts = format_message_timestamp(reply_to_message.created_at, now)
         reply_author = f"{reply_to_message.author.display_name}({reply_to_message.author.id})"
         reply_content = reply_to_message.clean_content
+        # Include attachments from reply
+        if reply_to_message.attachments:
+            for att in reply_to_message.attachments:
+                reply_content += f" [Attachment: {att.url}]"
         reply_context_str = (
             f"\n[REPLY CONTEXT]\n"
             f"The user is replying to:\n"
             f"{reply_ts} {reply_author}: {reply_content}\n"
             f"----------------\n"
         )
+
+    # Build current message content with attachments
+    current_message_content = raw_prompt
+    if message.attachments:
+        for att in message.attachments:
+            current_message_content += f" [Attachment: {att.url}]"
 
     prompt = (
         f"{channel_meta}"
@@ -302,7 +312,7 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None, repl
         f"Conversation History:\n"
         + "\n".join(context_lines)
         + f"\n{reply_context_str}"
-        + f"\n{message_timestamp} {user_label} says: {raw_prompt}\n\n"
+        + f"\n{message_timestamp} {user_label} says: {current_message_content}\n\n"
         f"IMPORTANT: The message above is the CURRENT message that you need to respond to."
     )
     return prompt
