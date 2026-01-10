@@ -105,17 +105,6 @@ async def create_schema():
                 # Column might already exist or other non-critical error
                 logger.debug(f"Migration query note: {e}")
         
-        # Knowledge ingestion tracking columns
-        ingestion_migrations = [
-            "ALTER TABLE channel_status ADD COLUMN IF NOT EXISTS knowledge_ingested BOOLEAN DEFAULT FALSE",
-            "ALTER TABLE channel_status ADD COLUMN IF NOT EXISTS knowledge_ingested_at TIMESTAMP WITH TIME ZONE",
-            "ALTER TABLE channel_status ADD COLUMN IF NOT EXISTS knowledge_message_count INTEGER DEFAULT 0",
-        ]
-        for query in ingestion_migrations:
-            try:
-                await conn.execute(query)
-            except Exception as e:
-                logger.debug(f"Ingestion migration note: {e}")
         
         # Create indexes INDIVIDUALLY (each can reference new columns safely now)
         index_queries = [
@@ -590,62 +579,4 @@ async def delete_message_v2(message_id: int):
     except Exception as e:
         logger.error(f"Failed to delete message_v2 {message_id}: {e}")
 
-
-# ──────────────────────────────────────────────
-# Knowledge Ingestion Tracking
-# ──────────────────────────────────────────────
-
-async def is_channel_knowledge_ingested(channel_id: int) -> bool:
-    """Check if a channel's messages have been ingested to knowledge base."""
-    if not pool:
-        return False
-    
-    try:
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT knowledge_ingested FROM channel_status WHERE channel_id = $1",
-                channel_id
-            )
-            return row['knowledge_ingested'] if row else False
-    except Exception as e:
-        logger.debug(f"Failed to check ingestion status for {channel_id}: {e}")
-        return False
-
-
-async def mark_channel_knowledge_ingested(channel_id: int, message_count: int = 0):
-    """Mark a channel as having been ingested to knowledge base."""
-    if not pool:
-        return
-    
-    try:
-        async with pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO channel_status (channel_id, knowledge_ingested, knowledge_ingested_at, knowledge_message_count)
-                VALUES ($1, TRUE, NOW(), $2)
-                ON CONFLICT (channel_id) DO UPDATE SET 
-                    knowledge_ingested = TRUE,
-                    knowledge_ingested_at = NOW(),
-                    knowledge_message_count = $2
-            """, channel_id, message_count)
-    except Exception as e:
-        logger.error(f"Failed to mark channel {channel_id} as ingested: {e}")
-
-
-async def get_channels_needing_ingestion() -> List[int]:
-    """Get list of channel IDs that haven't been ingested yet."""
-    if not pool:
-        return []
-    
-    try:
-        async with pool.acquire() as conn:
-            rows = await conn.fetch("""
-                SELECT DISTINCT m.channel_id 
-                FROM messages m
-                LEFT JOIN channel_status cs ON m.channel_id = cs.channel_id
-                WHERE cs.knowledge_ingested IS NULL OR cs.knowledge_ingested = FALSE
-            """)
-            return [row['channel_id'] for row in rows]
-    except Exception as e:
-        logger.error(f"Failed to get channels needing ingestion: {e}")
-        return []
 

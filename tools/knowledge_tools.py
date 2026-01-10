@@ -34,7 +34,6 @@ class KnowledgeIngestTools(Toolkit):
         if self.kb:
             self.register(self.add_attachment)
             self.register(self.add_url)
-            self.register(self.refresh_discord_knowledge)
     
     async def add_attachment(
         self, 
@@ -104,22 +103,3 @@ class KnowledgeIngestTools(Toolkit):
         except Exception as e:
             logger.error(f"[Knowledge] Failed to add URL: {e}")
             return f"❌ Failed: {e}"
-    
-    async def refresh_discord_knowledge(self, hours: int = 24) -> str:
-        """
-        Refresh knowledge base with recent Discord messages.
-        Ingests messages from channels where I've been active.
-        
-        Args:
-            hours: How many hours back to look (default 24)
-        
-        Returns:
-            Summary of ingestion results
-        """
-        try:
-            from core.discord_knowledge_ingestion import ingest_active_channels
-            chunks = await ingest_active_channels(hours=hours)
-            return f"✅ Refreshed knowledge base: {chunks} conversation chunks ingested from the last {hours}h"
-        except Exception as e:
-            logger.error(f"[Knowledge] Failed to refresh Discord knowledge: {e}")
-            return f"❌ Failed to refresh: {e}"

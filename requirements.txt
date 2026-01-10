@@ -1,4 +1,5 @@
 agno
+memori
 openai>=1.77.0
 arize-phoenix
 langtrace-python-sdk

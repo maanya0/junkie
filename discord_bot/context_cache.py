@@ -410,14 +410,6 @@ async def append_message_to_cache(message):
         reply_to_author_name=reply_to_author_name,
         reply_to_content=reply_to_content
     )
-    
-    # Queue for live knowledge ingestion (ingest messages falling off context window)
-    try:
-        from core.discord_knowledge_ingestion import on_new_message
-        channel_name = getattr(message.channel, "name", "DM")
-        await on_new_message(message.channel.id, channel_name)
-    except Exception as e:
-        logger.debug(f"[KnowledgeIngestion] Overflow check failed (non-critical): {e}")
 
 
 async def update_message_in_cache(before, after):

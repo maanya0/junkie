@@ -5,7 +5,7 @@ import time
 from discord_bot.discord_utils import resolve_mentions, restore_mentions, correct_mentions
 from agno.media import Image
 # NOTE: updated imports to use team factory functions
-from agent.agent_factory import get_or_create_team, create_team_for_user
+from agent.agent_factory import get_or_create_team, create_team_for_user, create_model
 from tools.tools_factory import setup_mcp, get_mcp_tools, MultiMCPTools
 from discord_bot.context_cache import (
     build_context_prompt,
@@ -13,7 +13,8 @@ from discord_bot.context_cache import (
     delete_message_from_cache,
     append_message_to_cache,
 )
-from core.config import TEAM_LEADER_CONTEXT_LIMIT
+from core.config import TEAM_LEADER_CONTEXT_LIMIT, MEMORI_ENABLED
+from core.memori_setup import get_memori_session_factory, build_memori_schema
 
 from core.database import init_db, close_db
 from core.triggers.scheduler import get_trigger_scheduler
@@ -22,6 +23,17 @@ import asyncio
 import discord
 
 logger = logging.getLogger(__name__)
+
+# Conditionally import Memori
+if MEMORI_ENABLED:
+    try:
+        from memori import Memori
+        logger.info("[Memori] Memori imported successfully")
+    except ImportError:
+        logger.warning("[Memori] memori package not installed, disabling Memori")
+        Memori = None
+else:
+    Memori = None
 
 async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images: list = None, client=None) -> str:
     """
@@ -60,6 +72,12 @@ def setup_chat(bot):
         logger.info("[on_ready] Initializing database...")
         await init_db()
         logger.info("[on_ready] Database initialized")
+        
+        # Build Memori schema if enabled
+        if MEMORI_ENABLED and Memori:
+            logger.info("[on_ready] Building Memori schema...")
+            build_memori_schema()
+            logger.info("[on_ready] Memori schema ready")
         
         # Start Backfill Task
         # Filter for TextChannels, DMs, and GroupChats where the bot has read permissions
@@ -178,8 +196,24 @@ def setup_chat(bot):
                 channel_name = getattr(message.channel, "name", "DM")
                 logger.info(f"[chatbot] Agent invoked in channel {channel_name} ({message.channel.id}) by user {message.author.name} ({user_id})")
                 
-                # Execution context is now handled via agent session state
-
+                # Setup Memori with per-request isolation (avoids race conditions)
+                memori_instance = None
+                session_factory = get_memori_session_factory() if MEMORI_ENABLED and Memori else None
+                
+                if session_factory and Memori:
+                    try:
+                        # Create isolated model instance for this request
+                        request_model = create_model(user_id)
+                        # Wrap with Memori
+                        memori_instance = Memori(conn=session_factory).llm.register(openai_chat=request_model)
+                        memori_instance.attribution(
+                            entity_id=f"discord_user_{user_id}",
+                            process_id=f"discord_channel_{session_id}"
+                        )
+                        logger.debug(f"[chatbot] Memori initialized for user {user_id} in channel {session_id}")
+                    except Exception as e:
+                        logger.warning(f"[chatbot] Memori setup failed, continuing without: {e}")
+                        memori_instance = None
                 
                 start_time = time.time()
                 try:
@@ -193,6 +227,14 @@ def setup_chat(bot):
                         f"**Error:** Failed to process request: {str(e)[:500]}"
                     )
                     return
+                finally:
+                    # Ensure Memori fact extraction completes
+                    if memori_instance:
+                        try:
+                            memori_instance.config.augmentation.wait()
+                            logger.debug(f"[chatbot] Memori augmentation completed for user {user_id}")
+                        except Exception as e:
+                            logger.warning(f"[chatbot] Memori augmentation wait failed: {e}")
                 
                 end_time = time.time()
                 time_taken = end_time - start_time

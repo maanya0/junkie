@@ -187,11 +187,3 @@ async def start_backfill_task(channels):
     logger.info(f"[Backfill] ═══════════════════════════════════════")
     logger.info(f"[Backfill] Summary: {successes}/{len(channels)} channels successful, {len(errors)} failed")
     logger.info(f"[Backfill] ═══════════════════════════════════════")
-    
-    # Trigger bulk knowledge ingestion (ingest messages outside context window)
-    try:
-        from core.discord_knowledge_ingestion import bulk_ingest_all_channels
-        logger.info("[Backfill] Starting bulk knowledge ingestion...")
-        asyncio.create_task(bulk_ingest_all_channels())
-    except Exception as e:
-        logger.error(f"[Backfill] Knowledge ingestion failed: {e}")

@@ -47,3 +47,6 @@ TEAM_LEADER_CONTEXT_LIMIT = int(os.getenv("TEAM_LEADER_CONTEXT_LIMIT", "100"))
 EMBEDDER_BASE_URL = os.getenv("EMBEDDER_BASE_URL", "")  # LiteLLM proxy URL
 EMBEDDER_MODEL = os.getenv("EMBEDDER_MODEL", "mistral/mistral-embed")  # Model via LiteLLM
 EMBEDDER_API_KEY = os.getenv("EMBEDDER_API_KEY", os.getenv("CUSTOM_PROVIDER_API_KEY", ""))
+
+# Memori Configuration (persistent memory layer)
+MEMORI_ENABLED = os.getenv("MEMORI_ENABLED", "true").lower() == "true"
