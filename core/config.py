@@ -41,3 +41,9 @@ MCP_URLS = os.getenv("MCP_URLS", "").strip()
 CONTEXT_AGENT_MODEL = os.getenv("CONTEXT_AGENT_MODEL", "gemini-2.5-flash-lite")
 CONTEXT_AGENT_MAX_MESSAGES = int(os.getenv("CONTEXT_AGENT_MAX_MESSAGES", "50000"))
 TEAM_LEADER_CONTEXT_LIMIT = int(os.getenv("TEAM_LEADER_CONTEXT_LIMIT", "100"))
+
+# Embedder Configuration (for knowledge base)
+# Use LiteLLM proxy for embeddings (supports load balancing/fallback)
+EMBEDDER_BASE_URL = os.getenv("EMBEDDER_BASE_URL", "")  # LiteLLM proxy URL
+EMBEDDER_MODEL = os.getenv("EMBEDDER_MODEL", "mistral/mistral-embed")  # Model via LiteLLM
+EMBEDDER_API_KEY = os.getenv("EMBEDDER_API_KEY", os.getenv("CUSTOM_PROVIDER_API_KEY", ""))

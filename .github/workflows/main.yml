@@ -6,6 +6,7 @@ on:
       - main
       - team
       - v0
+      - jsontest
     paths-ignore:
       - 'docs/**'
   pull_request:
@@ -13,6 +14,7 @@ on:
       - main
       - team
       - v0
+      - jsontest
     paths-ignore:
       - 'docs/**'
 
@@ -60,6 +62,9 @@ jobs:
             
             # Generate :v0 ONLY when the branch is 'v0'
             type=raw,value=v0,enable=${{ github.ref == 'refs/heads/v0' }}
+            
+            # Generate :jsontest ONLY when the branch is 'jsontest'
+            type=raw,value=jsontest,enable=${{ github.ref == 'refs/heads/jsontest' }}
 
       - name: Build and push Docker image
         id: build

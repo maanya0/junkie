@@ -30,7 +30,7 @@ from core.database import (
 logger = logging.getLogger(__name__)
 
 # Configuration
-SMART_SYNC_CONCURRENCY = int(os.getenv("SMART_SYNC_CONCURRENCY", "5"))
+SMART_SYNC_CONCURRENCY = int(os.getenv("SMART_SYNC_CONCURRENCY", "8"))
 SMART_SYNC_LIMIT = int(os.getenv("SMART_SYNC_LIMIT", "200"))
 SMART_SYNC_DELTA_HOURS = int(os.getenv("SMART_SYNC_DELTA_HOURS", "24"))
 
@@ -268,7 +268,7 @@ async def smart_sync_all_channels(
             stats = await smart_sync_channel(channel, sync_limit, force_full)
             all_stats.append(stats)
             # Small delay to be nice to Discord API
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.1)
     
     # Create tasks for all channels
     tasks = [sync_with_semaphore(c) for c in channels]

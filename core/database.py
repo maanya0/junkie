@@ -83,11 +83,16 @@ async def create_schema():
             );
         """)
         
-        # Add new columns to existing tables (migration for smart sync)
+        # Add new columns to existing tables (migration for smart sync + reply support)
         # These use IF NOT EXISTS pattern for safe migration
         migration_queries = [
             # Add content_hash column to messages
             "ALTER TABLE messages ADD COLUMN IF NOT EXISTS content_hash TEXT",
+            # Add reply tracking columns to messages
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_message_id BIGINT",
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_author_id BIGINT",
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_author_name TEXT",
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_content TEXT",
             # Add sync tracking columns to channel_status
             "ALTER TABLE channel_status ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP WITH TIME ZONE",
             "ALTER TABLE channel_status ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMP WITH TIME ZONE",
@@ -100,6 +105,18 @@ async def create_schema():
                 # Column might already exist or other non-critical error
                 logger.debug(f"Migration query note: {e}")
         
+        # Knowledge ingestion tracking columns
+        ingestion_migrations = [
+            "ALTER TABLE channel_status ADD COLUMN IF NOT EXISTS knowledge_ingested BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE channel_status ADD COLUMN IF NOT EXISTS knowledge_ingested_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE channel_status ADD COLUMN IF NOT EXISTS knowledge_message_count INTEGER DEFAULT 0",
+        ]
+        for query in ingestion_migrations:
+            try:
+                await conn.execute(query)
+            except Exception as e:
+                logger.debug(f"Ingestion migration note: {e}")
+        
         # Create indexes INDIVIDUALLY (each can reference new columns safely now)
         index_queries = [
             # Basic indexes
@@ -107,6 +124,8 @@ async def create_schema():
             "CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages (message_id)",
             # Hash-based change detection index (depends on content_hash column)
             "CREATE INDEX IF NOT EXISTS idx_messages_channel_hash ON messages (channel_id, message_id, content_hash)",
+            # Reply hierarchy index
+            "CREATE INDEX IF NOT EXISTS idx_messages_reply_to on messages (reply_to_message_id) WHERE reply_to_message_id IS NOT NULL",
             # Drop old ASC index
             "DROP INDEX IF EXISTS idx_messages_channel_created_asc",
             # Activity ordering index
@@ -131,7 +150,7 @@ async def create_schema():
         except Exception as e:
             logger.debug(f"Partial index creation note: {e}")
         
-        logger.info("Database schema initialized with smart sync support.")
+        logger.info("Database schema initialized with smart sync and reply support.")
 
 async def store_message(
     message_id: int,
@@ -140,7 +159,12 @@ async def store_message(
     author_name: str,
     content: str,
     created_at: datetime,
-    timestamp_str: str
+    timestamp_str: str,
+    content_hash: str = None,
+    reply_to_message_id: int = None,
+    reply_to_author_id: int = None,
+    reply_to_author_name: str = None,
+    reply_to_content: str = None
 ):
     """Store or update a message in the database."""
     if not pool:
@@ -149,12 +173,19 @@ async def store_message(
     try:
         async with pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO messages (message_id, channel_id, author_id, author_name, content, created_at, timestamp_str)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                INSERT INTO messages (
+                    message_id, channel_id, author_id, author_name, content, 
+                    created_at, timestamp_str, content_hash,
+                    reply_to_message_id, reply_to_author_id, reply_to_author_name, reply_to_content
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 ON CONFLICT (message_id) DO UPDATE SET
                     content = EXCLUDED.content,
-                    timestamp_str = EXCLUDED.timestamp_str;
-            """, message_id, channel_id, author_id, author_name, content, created_at, timestamp_str)
+                    timestamp_str = EXCLUDED.timestamp_str,
+                    content_hash = EXCLUDED.content_hash;
+            """, message_id, channel_id, author_id, author_name, content, 
+                created_at, timestamp_str, content_hash,
+                reply_to_message_id, reply_to_author_id, reply_to_author_name, reply_to_content)
     except Exception as e:
         logger.error(f"Failed to store message {message_id}: {e}")
         raise  # Propagate error to caller instead of silently swallowing
@@ -182,7 +213,10 @@ async def get_messages(channel_id: int, limit: int = 2000) -> List[Dict]:
         async with pool.acquire() as conn:
             # ORDER BY DESC to get NEWEST messages first, then reverse to chronological
             rows = await conn.fetch("""
-                SELECT message_id, channel_id, author_id, author_name, content, created_at
+                SELECT 
+                    message_id, channel_id, author_id, author_name, content, 
+                    created_at, reply_to_message_id, reply_to_author_id, 
+                    reply_to_author_name, reply_to_content
                 FROM messages 
                 WHERE channel_id = $1 
                 ORDER BY created_at DESC 
@@ -335,6 +369,55 @@ async def batch_store_messages(messages: List[Dict]) -> int:
         return 0
 
 
+async def batch_store_messages_with_replies(messages: List[Dict]) -> int:
+    """
+    Batch store messages with full reply tracking (optimized for fetch_and_cache_from_api).
+    
+    Each message dict should have:
+        message_id, channel_id, author_id, author_name, content, 
+        content_hash, created_at, timestamp_str,
+        reply_to_message_id, reply_to_author_id, reply_to_author_name, reply_to_content
+    
+    Returns the number of messages stored.
+    """
+    if not pool or not messages:
+        return 0
+    
+    try:
+        async with pool.acquire() as conn:
+            # Prepare data for batch insert with all columns including replies
+            values = [
+                (
+                    m['message_id'], m['channel_id'], m['author_id'], 
+                    m['author_name'], m['content'], m.get('content_hash'),
+                    m['created_at'], m['timestamp_str'],
+                    m.get('reply_to_message_id'), m.get('reply_to_author_id'),
+                    m.get('reply_to_author_name'), m.get('reply_to_content')
+                )
+                for m in messages
+            ]
+            
+            # Use executemany for batch operation with upsert
+            await conn.executemany("""
+                INSERT INTO messages (
+                    message_id, channel_id, author_id, author_name, content, content_hash,
+                    created_at, timestamp_str,
+                    reply_to_message_id, reply_to_author_id, reply_to_author_name, reply_to_content
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                ON CONFLICT (message_id) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    content_hash = EXCLUDED.content_hash,
+                    timestamp_str = EXCLUDED.timestamp_str;
+            """, values)
+            
+            logger.debug(f"Batch stored {len(values)} messages with replies")
+            return len(values)
+    except Exception as e:
+        logger.error(f"Failed to batch store messages with replies: {e}")
+        return 0
+
+
 async def batch_delete_messages(message_ids: List[int]) -> int:
     """Batch delete multiple messages efficiently."""
     if not pool or not message_ids:
@@ -423,4 +506,146 @@ async def get_db_message_ids(channel_id: int, limit: int = 500) -> set:
     except Exception as e:
         logger.error(f"Failed to get message IDs for channel {channel_id}: {e}")
         return set()
+
+
+# ──────────────────────────────────────────────
+# messages_v2 Functions (Reply Hierarchy Support)
+# ──────────────────────────────────────────────
+
+async def store_message_v2(
+    message_id: int,
+    channel_id: int,
+    author_id: int,
+    author_name: str,
+    content: str,
+    created_at: datetime,
+    timestamp_str: str,
+    content_hash: str = None,
+    reply_to_message_id: int = None,
+    reply_to_author_id: int = None,
+    reply_to_author_name: str = None,
+    reply_to_content: str = None
+):
+    """Store or update a message in messages_v2 with reply tracking."""
+    if not pool:
+        return
+
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO messages_v2 (
+                    message_id, channel_id, author_id, author_name, content, 
+                    created_at, timestamp_str, content_hash,
+                    reply_to_message_id, reply_to_author_id, reply_to_author_name, reply_to_content
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                ON CONFLICT (message_id) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    timestamp_str = EXCLUDED.timestamp_str,
+                    content_hash = EXCLUDED.content_hash;
+            """, message_id, channel_id, author_id, author_name, content, 
+                created_at, timestamp_str, content_hash,
+                reply_to_message_id, reply_to_author_id, reply_to_author_name, reply_to_content)
+    except Exception as e:
+        logger.error(f"Failed to store message_v2 {message_id}: {e}")
+        raise
+
+
+async def get_messages_v2(channel_id: int, limit: int = 100) -> List[Dict]:
+    """
+    Retrieve messages with reply info for a channel in chronological order.
+    Returns structured data for JSON context building.
+    """
+    if not pool:
+        return []
+
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT 
+                    message_id, channel_id, author_id, author_name, content, 
+                    created_at, reply_to_message_id, reply_to_author_id, 
+                    reply_to_author_name, reply_to_content
+                FROM messages_v2 
+                WHERE channel_id = $1 
+                ORDER BY created_at DESC 
+                LIMIT $2
+            """, channel_id, limit)
+            
+            # Reverse to chronological order
+            return list(reversed([dict(row) for row in rows]))
+    except Exception as e:
+        logger.error(f"Failed to get messages_v2 for channel {channel_id}: {e}")
+        return []
+
+
+async def delete_message_v2(message_id: int):
+    """Delete a message from messages_v2."""
+    if not pool:
+        return
+
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM messages_v2 WHERE message_id = $1", message_id)
+    except Exception as e:
+        logger.error(f"Failed to delete message_v2 {message_id}: {e}")
+
+
+# ──────────────────────────────────────────────
+# Knowledge Ingestion Tracking
+# ──────────────────────────────────────────────
+
+async def is_channel_knowledge_ingested(channel_id: int) -> bool:
+    """Check if a channel's messages have been ingested to knowledge base."""
+    if not pool:
+        return False
+    
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT knowledge_ingested FROM channel_status WHERE channel_id = $1",
+                channel_id
+            )
+            return row['knowledge_ingested'] if row else False
+    except Exception as e:
+        logger.debug(f"Failed to check ingestion status for {channel_id}: {e}")
+        return False
+
+
+async def mark_channel_knowledge_ingested(channel_id: int, message_count: int = 0):
+    """Mark a channel as having been ingested to knowledge base."""
+    if not pool:
+        return
+    
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO channel_status (channel_id, knowledge_ingested, knowledge_ingested_at, knowledge_message_count)
+                VALUES ($1, TRUE, NOW(), $2)
+                ON CONFLICT (channel_id) DO UPDATE SET 
+                    knowledge_ingested = TRUE,
+                    knowledge_ingested_at = NOW(),
+                    knowledge_message_count = $2
+            """, channel_id, message_count)
+    except Exception as e:
+        logger.error(f"Failed to mark channel {channel_id} as ingested: {e}")
+
+
+async def get_channels_needing_ingestion() -> List[int]:
+    """Get list of channel IDs that haven't been ingested yet."""
+    if not pool:
+        return []
+    
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT DISTINCT m.channel_id 
+                FROM messages m
+                LEFT JOIN channel_status cs ON m.channel_id = cs.channel_id
+                WHERE cs.knowledge_ingested IS NULL OR cs.knowledge_ingested = FALSE
+            """)
+            return [row['channel_id'] for row in rows]
+    except Exception as e:
+        logger.error(f"Failed to get channels needing ingestion: {e}")
+        return []
 

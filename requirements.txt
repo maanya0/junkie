@@ -40,3 +40,4 @@ pypdf
 mistralai
 psycopg[binary]
 sqlalchemy
+chonkie

@@ -140,7 +140,7 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                     
                     # Small delay to avoid hammering the API
                     if deepen_iteration < max_deepen_iterations and current_count < target_limit:
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(0.1)
                         
                 except Exception as e:
                     logger.error(f"[Backfill] Error deepening history (iteration {deepen_iteration + 1}): {e}")
@@ -159,7 +159,7 @@ async def start_backfill_task(channels):
     Handles failures gracefully without cancelling other tasks.
     """
     # Default to 2 concurrent channels to be safe with rate limits
-    concurrency = int(os.getenv("BACKFILL_CONCURRENCY", "2"))
+    concurrency = int(os.getenv("BACKFILL_CONCURRENCY", "4"))
     sem = asyncio.Semaphore(concurrency)
     
     logger.info(f"[Backfill] Starting background backfill for {len(channels)} channels with concurrency {concurrency}.")
@@ -173,7 +173,7 @@ async def start_backfill_task(channels):
                 logger.error(f"[Backfill] Failed for channel {channel_name} ({channel.id}): {e}", exc_info=True)
             finally:
                 # Small sleep to be nice to API even with semaphore
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
 
     # Create tasks for all channels
     tasks = [bound_backfill(c) for c in channels]
@@ -187,3 +187,11 @@ async def start_backfill_task(channels):
     logger.info(f"[Backfill] ═══════════════════════════════════════")
     logger.info(f"[Backfill] Summary: {successes}/{len(channels)} channels successful, {len(errors)} failed")
     logger.info(f"[Backfill] ═══════════════════════════════════════")
+    
+    # Trigger bulk knowledge ingestion (ingest messages outside context window)
+    try:
+        from core.discord_knowledge_ingestion import bulk_ingest_all_channels
+        logger.info("[Backfill] Starting bulk knowledge ingestion...")
+        asyncio.create_task(bulk_ingest_all_channels())
+    except Exception as e:
+        logger.error(f"[Backfill] Knowledge ingestion failed: {e}")

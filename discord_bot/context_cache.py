@@ -90,61 +90,30 @@ async def get_recent_context(channel, limit: int = 500, before_message=None) -> 
     # 1. Try DB first
     db_messages = await get_messages(channel_id, limit)
     
-    # If we have enough messages, return them
-    # Note: We ignore 'before_message' for DB fetch simplicity for now, 
-    # assuming we want the *latest* context. If strict pagination is needed, 
-    # get_messages needs updating. For chatbot context, latest is usually what we want.
-    if len(db_messages) >= limit and before_message is None:
-        formatted = []
-        current_time = datetime.now(timezone.utc)
-        for m in db_messages:
-            # Calculate relative time dynamically
-            rel_time = format_message_timestamp(m['created_at'], current_time)
-            formatted.append(f"{rel_time} {m['author_name']}({m['author_id']}): {m['content']}")
-        return formatted
 
-    # 2. If DB has insufficient data, we might rely on backfill or fetch fresh
-    # For "instant" retrieval, we prefer DB. But if it's empty, we must fetch.
-    if len(db_messages) == 0:
-        logger.info(f"[get_recent_context] DB empty for {channel_id}, fetching from API.")
-        return await fetch_and_cache_from_api(channel, limit, before_message)
-    
-    # If we have some data but not enough, check if we can fetch more
+    # 2. If DB has insufficient data, fetch from API
     if len(db_messages) < limit:
-        # Check if channel is fully backfilled (meaning no more history exists)
+        # Check if channel is fully backfilled
         is_full = await is_channel_fully_backfilled(channel_id)
         
-        if not is_full:
+        # If DB is empty, we fetch regardless of backfill status to be safe (migration case)
+        if not is_full or len(db_messages) == 0:
             needed = limit - len(db_messages)
-            logger.info(f"[get_recent_context] DB has {len(db_messages)} messages, need {needed} more. Fetching from API.")
-            
-            # Oldest message in DB is the first one in the list (chronological)
-            oldest_msg_id = db_messages[0]['message_id']
-            
-            try:
-                before_obj = discord.Object(id=oldest_msg_id)
-                more_messages = await fetch_and_cache_from_api(channel, limit=needed, before_message=before_obj)
-                
-                if not more_messages:
-                    # If API returns nothing, we are likely fully backfilled
-                    await mark_channel_fully_backfilled(channel_id, True)
-            except Exception as e:
-                logger.error(f"[get_recent_context] Error fetching more history: {e}")
+            if len(db_messages) == 0:
+                logger.info(f"[get_recent_context] DB empty for {channel_id}, fetching from API.")
+                await fetch_and_cache_from_api(channel, limit, before_message)
+            else:
+                logger.info(f"[get_recent_context] DB has {len(db_messages)} messages, fetching more.")
+                oldest_msg_id = db_messages[0]['message_id']
+                try:
+                    before_obj = discord.Object(id=oldest_msg_id)
+                    await fetch_and_cache_from_api(channel, limit=needed, before_message=before_obj)
+                except Exception as e:
+                     logger.error(f"[get_recent_context] Error fetching more: {e}")
 
-    # FIXED: Don't re-fetch in a loop. Return what we have after one attempt.
-    logger.info(f"[get_recent_context] Returning {len(db_messages)} messages from DB (requested {limit}).")
-    
-    # Format messages with current time (calculated once)
-    current_time = datetime.now(timezone.utc)
-    formatted = []
-    
-    # Re-query DB one final time to include any newly cached messages
-    final_db_messages = await get_messages(channel_id, limit)
-    
-    for m in final_db_messages:
-        rel_time = format_message_timestamp(m['created_at'], current_time)
-        formatted.append(f"{rel_time} {m['author_name']}({m['author_id']}): {m['content']}")
-    return formatted
+    # Re-fetch from DB to get everything including newly fetched
+    final_messages = await get_messages(channel_id, limit)
+    return final_messages
 
 async def fetch_and_cache_from_api(channel, limit, before_message=None, after_message=None):
     """Helper to fetch from API and cache to DB."""
@@ -190,12 +159,9 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
             messages.reverse() # Chronological
         
         formatted = []
-        stored_count = 0
-        fetched_message_ids = set()  # Track which messages we fetched from Discord
+        messages_to_store = []  # Collect for batch insert
         
         for m in messages:
-            fetched_message_ids.add(m.id)
-            
             # Store absolute timestamp for hygiene, but use dynamic relative time for return
             timestamp_str = m.created_at.strftime("%Y-%m-%d %H:%M:%S")
             rel_time = format_message_timestamp(m.created_at, current_time)
@@ -212,23 +178,48 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
             
             content = " ".join(content_parts) if content_parts else "[Empty message]"
             
-            # Store in DB (handles both insert and update for edits)
-            await store_message(
-                message_id=m.id,
-                channel_id=channel.id,
-                author_id=m.author.id,
-                author_name=m.author.display_name,
-                content=content,
-                created_at=m.created_at,
-                timestamp_str=timestamp_str
-            )
-            stored_count += 1
+            # Prepare reply info if present
+            reply_to_id = None
+            reply_to_author_id = None
+            reply_to_author_name = None
+            reply_to_content = None
             
+            if m.reference and m.reference.resolved:
+                if isinstance(m.reference.resolved, discord.Message):
+                    ref = m.reference.resolved
+                    reply_to_id = ref.id
+                    reply_to_author_id = ref.author.id
+                    reply_to_author_name = ref.author.display_name
+                    reply_to_content = ref.clean_content
+
+            content_hash = str(hash(content))
+            
+            # Collect message data for batch insert
+            messages_to_store.append({
+                'message_id': m.id,
+                'channel_id': channel.id,
+                'author_id': m.author.id,
+                'author_name': m.author.display_name,
+                'content': content,
+                'created_at': m.created_at,
+                'timestamp_str': timestamp_str,
+                'content_hash': content_hash,
+                'reply_to_message_id': reply_to_id,
+                'reply_to_author_id': reply_to_author_id,
+                'reply_to_author_name': reply_to_author_name,
+                'reply_to_content': reply_to_content
+            })
+            
+            # Build formatted string for legacy return value
             formatted.append(
                 f"{rel_time} {m.author.display_name}({m.author.id}): {m.clean_content}"
             )
         
-        logger.info(f"[fetch_and_cache] Successfully stored {stored_count} messages for channel {channel.id}")
+        # Batch store all messages at once (single DB round-trip instead of N)
+        if messages_to_store:
+            from core.database import batch_store_messages_with_replies
+            stored_count = await batch_store_messages_with_replies(messages_to_store)
+            logger.info(f"[fetch_and_cache] Batch stored {stored_count} messages for channel {channel.id}")
         return formatted
     except discord.errors.Forbidden:
         logger.warning(f"[fetch_and_cache] Missing access to channel {channel.id}. Skipping.")
@@ -244,17 +235,24 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
 
 async def build_context_prompt(message, raw_prompt: str, limit: int = None, reply_to_message=None):
     """
-    Build a model-ready text prompt.
+    Build a model-ready TOON-formatted prompt with structured history.
     """
+    import json
+    try:
+        from toon_format import encode as toon_encode
+        HAS_TOON = True
+    except ImportError:
+        HAS_TOON = False
+    
     if limit is None:
         limit = MAX_MESSAGES_IN_CACHE
 
-    user_label = f"{message.author.display_name}({message.author.id})"
-    context_lines = await get_recent_context(message.channel, limit=limit, before_message=message)
+    # Use unified structured history
+    structured_history = await get_recent_context(message.channel, limit=limit, before_message=message)
 
     # Trim if needed
-    if len(context_lines) > limit:
-        context_lines = context_lines[-limit:]
+    if len(structured_history) > limit:
+        structured_history = structured_history[-limit:]
 
     # Metadata
     try:
@@ -263,13 +261,6 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None, repl
     except Exception:
         channel_name = "unknown"
         guild_name = "DM"
-
-    channel_meta = (
-        f"Channel ID: {message.channel.id}\n"
-        f"Channel: {channel_name}\n"
-        f"Guild: {guild_name}\n"
-        "----\n"
-    )
 
     # Time
     now = datetime.now(timezone.utc)
@@ -282,39 +273,85 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None, repl
     current_time_str = now.strftime("%Y-%m-%d %H:%M:%S %Z")
     message_timestamp = format_message_timestamp(message.created_at, now) or "[now]"
 
-    # Format Reply Context if present
-    reply_context_str = ""
-    if reply_to_message:
-        reply_ts = format_message_timestamp(reply_to_message.created_at, now)
-        reply_author = f"{reply_to_message.author.display_name}({reply_to_message.author.id})"
-        reply_content = reply_to_message.clean_content
-        # Include attachments from reply
-        if reply_to_message.attachments:
-            for att in reply_to_message.attachments:
-                reply_content += f" [Attachment: {att.url}]"
-        reply_context_str = (
-            f"\n[REPLY CONTEXT]\n"
-            f"The user is replying to:\n"
-            f"{reply_ts} {reply_author}: {reply_content}\n"
-            f"----------------\n"
-        )
+    # Process history for TOON
+    history_data = []
+    for m in structured_history:
+        # Format timestamps
+        ts = format_message_timestamp(m['created_at'], now)
+        
+        entry = {
+            "id": str(m['message_id']),
+            "author": f"{m['author_name']}",
+            "content": m['content'],
+            "time": ts
+        }
+        
+        # Add reply info if present
+        if m.get('reply_to_message_id'):
+            entry["reply_to"] = {
+                "id": str(m['reply_to_message_id']),
+                "author": m.get('reply_to_author_name', 'Unknown'),
+                "snippet": (m.get('reply_to_content') or "")[:50] + "..."
+            }
+        
+        history_data.append(entry)
 
-    # Build current message content with attachments
-    current_message_content = raw_prompt
+    # Build current message with attachments
+    current_attachments = []
     if message.attachments:
         for att in message.attachments:
-            current_message_content += f" [Attachment: {att.url}]"
+            current_attachments.append({
+                "filename": att.filename,
+                "url": att.url
+            })
 
-    prompt = (
-        f"{channel_meta}"
-        f"Current Time: {current_time_str}\n"
-        f"Timestamps are relative to this time.\n\n"
-        f"Conversation History:\n"
-        + "\n".join(context_lines)
-        + f"\n{reply_context_str}"
-        + f"\n{message_timestamp} {user_label} says: {current_message_content}\n\n"
-        f"IMPORTANT: The message above is the CURRENT message that you need to respond to."
-    )
+    # Build reply context for current message
+    reply_context = None
+    if reply_to_message:
+        reply_ts = format_message_timestamp(reply_to_message.created_at, now)
+        reply_context = {
+            "id": str(reply_to_message.id),
+            "author": reply_to_message.author.display_name,
+            "content": reply_to_message.clean_content,
+            "time": reply_ts
+        }
+
+    # Build the structured context structure
+    context_data = {
+        "meta": {
+            "channel": f"{channel_name} ({message.channel.id})",
+            "guild": guild_name,
+            "time": current_time_str
+        },
+        "history": history_data,
+        "current": {
+            "id": str(message.id),
+            "author": message.author.display_name,
+            "time": message_timestamp,
+            "content": raw_prompt,
+            "attachments": current_attachments, 
+            "reply_to": reply_context
+        }
+    }
+
+    # Format using TOON or JSON fallback
+    if HAS_TOON:
+        formatted_context = toon_encode(context_data)
+        format_name = "TOON"
+    else:
+        formatted_context = json.dumps(context_data, indent=2, ensure_ascii=False)
+        format_name = "JSON"
+
+    prompt = f"""## Context ({format_name})
+```{format_name.lower()}
+{formatted_context}
+```
+
+IMPORTANT: Responding to "current" message.
+- "history" holds recent conversation.
+- "reply_to" shows message hierarchy.
+- "attachments" contains URLs for tools."""
+
     return prompt
 
 
@@ -342,6 +379,23 @@ async def append_message_to_cache(message):
 
     timestamp_str = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
     
+    # Prepare reply info if present
+    reply_to_id = None
+    reply_to_author_id = None
+    reply_to_author_name = None
+    reply_to_content = None
+    
+    if message.reference and message.reference.resolved:
+        if isinstance(message.reference.resolved, discord.Message):
+            ref = message.reference.resolved
+            reply_to_id = ref.id
+            reply_to_author_id = ref.author.id
+            reply_to_author_name = ref.author.display_name
+            reply_to_content = ref.clean_content
+
+    content_hash = str(hash(content))
+    
+    # Store in DB (unified schema)
     await store_message(
         message_id=message.id,
         channel_id=message.channel.id,
@@ -349,8 +403,21 @@ async def append_message_to_cache(message):
         author_name=message.author.display_name,
         content=content,
         created_at=message.created_at,
-        timestamp_str=timestamp_str
+        timestamp_str=timestamp_str,
+        content_hash=content_hash,
+        reply_to_message_id=reply_to_id,
+        reply_to_author_id=reply_to_author_id,
+        reply_to_author_name=reply_to_author_name,
+        reply_to_content=reply_to_content
     )
+    
+    # Queue for live knowledge ingestion (ingest messages falling off context window)
+    try:
+        from core.discord_knowledge_ingestion import on_new_message
+        channel_name = getattr(message.channel, "name", "DM")
+        await on_new_message(message.channel.id, channel_name)
+    except Exception as e:
+        logger.debug(f"[KnowledgeIngestion] Overflow check failed (non-critical): {e}")
 
 
 async def update_message_in_cache(before, after):
