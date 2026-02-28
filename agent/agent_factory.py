@@ -109,6 +109,7 @@ def create_model(user_id: str):
             top_p=MODEL_TOP_P,
             base_url="https://api.groq.com/openai/v1",
             api_key=GROQ_API_KEY,
+            cache_response=True,
         )
 
     # Custom provider
@@ -119,6 +120,7 @@ def create_model(user_id: str):
         top_p=MODEL_TOP_P,
         base_url=PROVIDER,
         api_key=CUSTOM_PROVIDER_API_KEY,
+        cache_response=True,
     )
      
 def get_prompt() -> str:
@@ -152,6 +154,7 @@ memory_model = OpenAILike(
     id="openai/gpt-oss-120b",
     base_url="https://api.groq.com/openai/v1",
     api_key=GROQ_API_KEY,
+    cache_response=True,
 )
 memory_manager = MemoryManager(
     model=memory_model,
@@ -322,6 +325,7 @@ Be precise with timestamps and attribute statements accurately to users."""
         debug_level=DEBUG_LEVEL,
         enable_user_memories=True,
         memory_manager=memory_manager,  # Groq model for memory processing
+        compress_tool_results=True,
     )
 
     return model, team
