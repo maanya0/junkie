@@ -462,7 +462,8 @@ def setup_chat(bot):
             return
 
         logger.info(
-            f"[on_ready] Creating backfill+sync background task for {len(text_channels)} channels..."
+            "[on_ready] Creating backfill+sync background task for %s channels...",
+            len(text_channels),
         )
         backfill_task = asyncio.create_task(run_backfill_and_sync())
         logger.info("[on_ready] Backfill+sync task created - running in background")

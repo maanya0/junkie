@@ -1,3 +1,4 @@
+import asyncio
 import asyncpg
 import logging
 from typing import List, Optional, Dict, Set
@@ -7,6 +8,7 @@ from core.config import POSTGRES_URL
 logger = logging.getLogger(__name__)
 
 pool: Optional[asyncpg.Pool] = None
+_init_lock = asyncio.Lock()
 
 
 async def init_db():
@@ -19,25 +21,28 @@ async def init_db():
         Exception: If creating the connection pool or initializing the schema fails; the original exception is propagated.
     """
     global pool
-    if pool and not pool._closed:
-        logger.info("Database connection pool already initialized.")
-        return
+    async with _init_lock:
+        if pool and not pool.is_closing():
+            logger.info("Database connection pool already initialized.")
+            return
 
-    new_pool: Optional[asyncpg.Pool] = None
-    try:
-        new_pool = await asyncpg.create_pool(POSTGRES_URL)
-        pool = new_pool
-        logger.info("Database connection pool created.")
-        await create_schema()
-    except Exception as e:
-        if new_pool is not None:
-            try:
-                await new_pool.close()
-            finally:
-                if pool is new_pool:
-                    pool = None
-        logger.error(f"Failed to initialize database: {e}")
-        raise
+        new_pool: Optional[asyncpg.Pool] = None
+        try:
+            new_pool = await asyncpg.create_pool(POSTGRES_URL)
+            pool = new_pool
+            logger.info("Database connection pool created.")
+            await create_schema()
+        except Exception as e:
+            if new_pool is not None:
+                try:
+                    await new_pool.close()
+                except Exception:
+                    logger.exception("Failed to close database pool during init cleanup")
+                finally:
+                    if pool is new_pool:
+                        pool = None
+            logger.error(f"Failed to initialize database: {e}")
+            raise
 
 
 async def close_db():
