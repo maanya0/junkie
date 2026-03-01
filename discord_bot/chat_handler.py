@@ -1,5 +1,6 @@
 # chat_handler.py
 import logging
+import os
 import sys
 import time
 from discord_bot.discord_utils import resolve_mentions, restore_mentions, correct_mentions
@@ -21,6 +22,12 @@ import asyncio
 import discord
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_USER_IDS = {
+    user_id.strip()
+    for user_id in os.getenv("ALLOWED_USER_IDS", "").split(",")
+    if user_id.strip()
+}
 
 async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images: list = None, client=None) -> str:
     """
@@ -114,6 +121,9 @@ def setup_chat(bot):
         # Chatbot prefix (!) — handle via Team
         chatbot_prefix = "!"
         if message.content.startswith(chatbot_prefix):
+            if str(message.author.id) not in ALLOWED_USER_IDS:
+                return
+
             # Step 1: replace mentions with readable form for context
             processed_content = resolve_mentions(message)
             
