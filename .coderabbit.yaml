@@ -6,7 +6,7 @@ early_access: false
 # Reviews configuration
 reviews:
   # profile: 'performance' uses ruleset and tips focused on perf best-practices
-  profile: "Assertive"
+  profile: "assertive
 
   # If true, CodeRabbit will automatically file "Request changes" reviews for
   # issues it deems blocking. (set to true if you want strict enforcement)
