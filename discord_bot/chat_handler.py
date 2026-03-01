@@ -1,5 +1,7 @@
 # chat_handler.py
+import inspect
 import logging
+import os
 import sys
 import time
 from discord_bot.discord_utils import resolve_mentions, restore_mentions, correct_mentions
@@ -21,6 +23,12 @@ import asyncio
 import discord
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_USER_IDS = {
+    user_id.strip()
+    for user_id in os.getenv("ALLOWED_USER_IDS", "").split(",")
+    if user_id.strip()
+}
 
 async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images: list = None, client=None) -> str:
     """
@@ -49,8 +57,11 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images
 
 
 def setup_chat(bot):
+    backfill_task = None
+
     @bot.event
     async def on_ready():
+        nonlocal backfill_task
         logger.info("[on_ready] Bot ready event triggered!")
         # Ensure MCP tools are connected/initialized
         await setup_mcp()
@@ -91,13 +102,28 @@ def setup_chat(bot):
             except Exception as e:
                 logger.error(f"[on_ready] Backfill/sync task failed: {e}", exc_info=True)
         
-        logger.info(f"[on_ready] Creating backfill+sync background task for {len(text_channels)} channels...")
-        asyncio.create_task(run_backfill_and_sync())
-        logger.info("[on_ready] Backfill+sync task created - running in background")
+        if backfill_task and not backfill_task.done():
+            logger.info("[on_ready] Backfill+sync task already running; skipping duplicate creation")
+        else:
+            logger.info(f"[on_ready] Creating backfill+sync background task for {len(text_channels)} channels...")
+            backfill_task = asyncio.create_task(run_backfill_and_sync())
+            logger.info("[on_ready] Backfill+sync task created - running in background")
     
     @bot.event
     async def on_disconnect():
         """Clean shutdown of database connections and resources."""
+        nonlocal backfill_task
+
+        if backfill_task and not backfill_task.done():
+            logger.info("[on_disconnect] Cancelling backfill+sync background task...")
+            backfill_task.cancel()
+            try:
+                await backfill_task
+            except asyncio.CancelledError:
+                logger.info("[on_disconnect] Backfill+sync background task cancelled")
+            finally:
+                backfill_task = None
+
         logger.info("[on_disconnect] Bot disconnecting, closing database pool...")
         await close_db()
 
@@ -114,6 +140,14 @@ def setup_chat(bot):
         # Chatbot prefix (!) — handle via Team
         chatbot_prefix = "!"
         if message.content.startswith(chatbot_prefix):
+            if str(message.author.id) not in ALLOWED_USER_IDS:
+                logger.warning(
+                    "[chatbot] Ignoring unauthorized user %s in channel %s",
+                    message.author.id,
+                    message.channel.id,
+                )
+                return
+
             # Step 1: replace mentions with readable form for context
             processed_content = resolve_mentions(message)
             
@@ -180,7 +214,7 @@ def setup_chat(bot):
                     # Surface a truncated error to the user; keep details in logs
                     logger.exception(f"[chatbot] Failed to generate reply for user {user_id}")
                     await message.channel.send(
-                        f"**Error:** Failed to process request: {str(e)[:500]}"
+                        "An internal error occurred while processing your request. The team has been notified."
                     )
                     return
                 
@@ -235,12 +269,10 @@ async def main_cli():
         mcp = get_mcp_tools()
         if mcp:
             try:
-                # If close is async, await it; otherwise, call it
                 close_call = getattr(mcp, "close", None)
                 if close_call:
-                    if hasattr(close_call, "__await__"):
-                        await close_call()
-                    else:
-                        close_call()
+                    maybe_result = close_call()
+                    if inspect.isawaitable(maybe_result):
+                        await maybe_result
             except Exception:
                 logger.exception("Error closing MCP tools, ignoring.")
