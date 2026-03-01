@@ -28,6 +28,8 @@ reviews:
   auto_review:
     enabled: true
     drafts: true
+  ignore_usernames:
+      []
 
   # Apply reviews to every branch in the repository
   # Using "*" to include all branches (feature branches, dependabot, etc.)
