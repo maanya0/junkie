@@ -3,6 +3,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# User Authorization Configuration
+ALLOWED_USER_IDS = set(os.getenv("ALLOWED_USER_IDS", "").split(","))
+
 # Postgres Configuration
 POSTGRES_URL = os.getenv("POSTGRES_URL", "")
 
