@@ -1,5 +1,7 @@
 import os
 import logging
+import asyncio
+from typing import Dict
 from sqlalchemy.engine import make_url
 from core.observability import setup_phoenix_tracing
 
@@ -332,6 +334,25 @@ Be precise with timestamps and attribute statements accurately to users."""
 # -------------------------------------------------------------
 from collections import OrderedDict
 _user_teams = OrderedDict()
+_user_team_locks: Dict[str, asyncio.Lock] = {}
+_user_team_locks_guard = asyncio.Lock()
+_user_teams_lock = asyncio.Lock()
+
+
+async def _get_user_team_lock(user_id: str) -> asyncio.Lock:
+    """Return a per-user lock, creating it exactly once in a race-safe way."""
+    async with _user_team_locks_guard:
+        lock = _user_team_locks.get(user_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _user_team_locks[user_id] = lock
+        return lock
+
+
+async def _remove_user_team_lock(user_id: str) -> None:
+    """Drop a stale lock after a user's team is evicted from cache."""
+    async with _user_team_locks_guard:
+        _user_team_locks.pop(user_id, None)
 
 
 async def get_or_create_team(user_id: str, client=None):
@@ -340,44 +361,64 @@ async def get_or_create_team(user_id: str, client=None):
     Uses LRU eviction if cache exceeds MAX_AGENTS.
     Implements proper resource cleanup when evicting teams.
     """
-    if user_id in _user_teams:
-        # Move to end (mark as recently used)
-        _user_teams.move_to_end(user_id)
-        return _user_teams[user_id]
+    user_lock = await _get_user_team_lock(user_id)
+    async with user_lock:
+        oldest_team = None
+        oldest_user = None
 
-    # If cache full, evict oldest (least recently used) team
-    if len(_user_teams) >= MAX_AGENTS:
-        oldest_user, oldest_team = _user_teams.popitem(last=False)
-        logger.info(f"[TeamCache] Evicting team for user {oldest_user} (cache size: {MAX_AGENTS})")
-        
-        # Cleanup evicted team resources
-        try:
-            # Cleanup MCP connections if any
-            if hasattr(oldest_team, 'members'):
-                for member in oldest_team.members:
-                    # Check if member has MCP tools that need cleanup
-                    if hasattr(member, 'tools'):
-                        for tool in member.tools:
-                            if hasattr(tool, 'close'):
-                                try:
-                                    if hasattr(tool.close, '__await__'):
-                                        await tool.close()
-                                    else:
-                                        tool.close()
-                                except Exception as e:
-                                    logger.warning(f"[TeamCache] Error closing tool: {e}")
-            
-            # Cleanup team-level resources if available
-            if hasattr(oldest_team, 'cleanup'):
-                if hasattr(oldest_team.cleanup, '__await__'):
-                    await oldest_team.cleanup()
-                else:
-                    oldest_team.cleanup()
-        except Exception as e:
-            logger.error(f"[TeamCache] Error during team cleanup: {e}", exc_info=True)
+        async with _user_teams_lock:
+            if user_id in _user_teams:
+                # Move to end (mark as recently used)
+                _user_teams.move_to_end(user_id)
+                return _user_teams[user_id]
 
-    _, team = create_team_for_user(user_id, client=client)
-    _user_teams[user_id] = team
-    logger.info(f"[TeamCache] Created new team for user {user_id} (cache size: {len(_user_teams)}/{MAX_AGENTS})")
+            # If cache full, evict oldest (least recently used) team
+            if len(_user_teams) >= MAX_AGENTS:
+                oldest_user, oldest_team = _user_teams.popitem(last=False)
 
-    return team
+        if oldest_team is not None:
+            logger.info(f"[TeamCache] Evicting team for user {oldest_user} (cache size: {MAX_AGENTS})")
+            if oldest_user is not None:
+                await _remove_user_team_lock(oldest_user)
+
+            # Cleanup evicted team resources
+            try:
+                # Cleanup MCP connections if any
+                if hasattr(oldest_team, 'members'):
+                    for member in oldest_team.members:
+                        # Check if member has MCP tools that need cleanup
+                        if hasattr(member, 'tools'):
+                            for tool in member.tools:
+                                if hasattr(tool, 'close'):
+                                    try:
+                                        if hasattr(tool.close, '__await__'):
+                                            await tool.close()
+                                        else:
+                                            tool.close()
+                                    except Exception as e:
+                                        logger.warning(f"[TeamCache] Error closing tool: {e}")
+
+                # Cleanup team-level resources if available
+                if hasattr(oldest_team, 'cleanup'):
+                    if hasattr(oldest_team.cleanup, '__await__'):
+                        await oldest_team.cleanup()
+                    else:
+                        oldest_team.cleanup()
+            except Exception as e:
+                logger.error(f"[TeamCache] Error during team cleanup: {e}", exc_info=True)
+
+        _, team = create_team_for_user(user_id, client=client)
+
+        async with _user_teams_lock:
+            # Defensive re-check: if team was inserted unexpectedly, return it.
+            existing_team = _user_teams.get(user_id)
+            if existing_team is not None:
+                _user_teams.move_to_end(user_id)
+                return existing_team
+
+            _user_teams[user_id] = team
+            cache_size = len(_user_teams)
+
+        logger.info(f"[TeamCache] Created new team for user {user_id} (cache size: {cache_size}/{MAX_AGENTS})")
+
+        return team
