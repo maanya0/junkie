@@ -10,7 +10,14 @@ pool: Optional[asyncpg.Pool] = None
 
 
 async def init_db():
-    """Initialize the database connection pool."""
+    """
+    Initialize the module-level database connection pool and ensure the required schema exists.
+    
+    Sets the module-level `pool` variable to a new asyncpg connection pool and creates any missing tables/indexes by invoking schema creation.
+    
+    Raises:
+        Exception: If creating the connection pool or initializing the schema fails; the original exception is propagated.
+    """
     global pool
     try:
         pool = await asyncpg.create_pool(POSTGRES_URL)
@@ -31,7 +38,11 @@ async def close_db():
 
 
 async def create_schema():
-    """Create the necessary database schema."""
+    """
+    Ensure required database tables and indexes exist.
+    
+    Creates the following tables if missing: `messages`, `channel_status`, `access_control_settings`, `access_control_users`, and `bot_admins`, and creates optimized indexes for querying recent messages and message_id lookups. No action is taken if the module-level database pool is not initialized.
+    """
     if not pool:
         return
 
@@ -97,7 +108,20 @@ async def store_message(
     created_at: datetime,
     timestamp_str: str,
 ):
-    """Store or update a message in the database."""
+    """
+    Insert a new message record or update an existing message's content and timestamp.
+    
+    Upserts a message identified by `message_id` into the messages table; if a row with the same `message_id` already exists, its `content` and `timestamp_str` are replaced.
+    
+    Parameters:
+        message_id (int): Unique identifier for the message.
+        channel_id (int): Identifier of the channel the message belongs to.
+        author_id (int): Identifier of the message author.
+        author_name (str): Display name of the message author.
+        content (str): Message content to store.
+        created_at (datetime): Timestamp when the message was created.
+        timestamp_str (str): Original or formatted timestamp string to store.
+    """
     if not pool:
         return
 
@@ -167,7 +191,12 @@ async def get_messages(channel_id: int, limit: int = 2000) -> List[Dict]:
 
 
 async def get_message_count(channel_id: int) -> int:
-    """Get the number of messages stored for a channel."""
+    """
+    Return the number of messages stored for a channel.
+    
+    Returns:
+        count (int): Number of messages for the given channel_id. Returns 0 if the database pool is not initialized or if an error occurs while querying.
+    """
     if not pool:
         return 0
 
@@ -185,7 +214,15 @@ async def get_message_count(channel_id: int) -> int:
 
 
 async def get_latest_message_id(channel_id: int) -> Optional[int]:
-    """Get the ID of the newest message stored for a channel."""
+    """
+    Return the newest stored message ID for the given channel.
+    
+    Parameters:
+        channel_id (int): Channel identifier to query.
+    
+    Returns:
+        Optional[int]: The latest `message_id` for the channel, or `None` if no message is found.
+    """
     if not pool:
         return None
 
@@ -206,7 +243,11 @@ async def get_latest_message_id(channel_id: int) -> Optional[int]:
 
 
 async def get_oldest_message_id(channel_id: int) -> Optional[int]:
-    """Get the ID of the oldest message stored for a channel."""
+    """
+    Get the oldest stored message ID for the given channel.
+    
+    @returns The oldest message_id for the channel as an int, or `None` if no message exists, the database pool is uninitialized, or an error occurs.
+    """
     if not pool:
         return None
 
@@ -227,7 +268,14 @@ async def get_oldest_message_id(channel_id: int) -> Optional[int]:
 
 
 async def is_channel_fully_backfilled(channel_id: int) -> bool:
-    """Check if a channel is marked as fully backfilled."""
+    """
+    Determine whether the specified channel is recorded as fully backfilled.
+    
+    If the database pool is not initialized or an error occurs while querying, the function returns `False`.
+    
+    Returns:
+        `true` if the channel's `is_fully_backfilled` flag is set, `false` otherwise.
+    """
     if not pool:
         return False
     try:
@@ -247,7 +295,13 @@ async def is_channel_fully_backfilled(channel_id: int) -> bool:
 
 
 async def mark_channel_fully_backfilled(channel_id: int, status: bool = True):
-    """Mark a channel as fully backfilled."""
+    """
+    Set the backfilled state for a channel.
+    
+    Parameters:
+        channel_id (int): The identifier of the channel to update.
+        status (bool): `True` to mark the channel as fully backfilled, `False` to mark it as not fully backfilled.
+    """
     if not pool:
         return
     try:
@@ -268,7 +322,12 @@ async def mark_channel_fully_backfilled(channel_id: int, status: bool = True):
 
 
 async def get_access_control_mode(default_mode: str = "whitelist") -> str:
-    """Return active access control mode from DB, or default if unset/invalid."""
+    """
+    Get the active access control mode from the database, or return the provided default if the stored value is missing or invalid.
+    
+    Returns:
+        `'whitelist'` or `'blacklist'` — the persisted mode when valid, otherwise `default_mode`.
+    """
     if not pool:
         return default_mode
     try:
@@ -287,7 +346,18 @@ async def get_access_control_mode(default_mode: str = "whitelist") -> str:
 
 
 async def set_access_control_mode(mode: str):
-    """Persist access control mode."""
+    """
+    Set the access control mode persisted in the database.
+    
+    Parameters:
+        mode (str): Access control mode to store; must be "whitelist" or "blacklist".
+        
+    Raises:
+        ValueError: If `mode` is not "whitelist" or "blacklist".
+    
+    Notes:
+        If the database pool is not initialized, the function performs no action.
+    """
     if not pool:
         return
     if mode not in {"whitelist", "blacklist"}:
@@ -306,7 +376,14 @@ async def set_access_control_mode(mode: str):
 
 
 async def get_access_control_users() -> Set[str]:
-    """Return configured access-control user IDs as strings."""
+    """
+    Retrieve the configured access-control user IDs from the database as strings.
+    
+    If the database pool is not initialized or an error occurs while querying, an empty set is returned.
+    
+    Returns:
+        users (Set[str]): A set of user IDs converted to strings; empty if unavailable or on error.
+    """
     if not pool:
         return set()
     try:
@@ -346,7 +423,12 @@ async def remove_access_control_user(user_id: int):
 
 
 async def get_admin_users() -> Set[str]:
-    """Return additional admin IDs stored in DB."""
+    """
+    Retrieve admin user IDs stored in the database.
+    
+    Returns:
+        Set[str]: A set of admin user IDs as strings. Returns an empty set if the database pool is not initialized or if an error occurs.
+    """
     if not pool:
         return set()
     try:
@@ -359,7 +441,15 @@ async def get_admin_users() -> Set[str]:
 
 
 async def add_admin_user(user_id: int, added_by: Optional[int] = None):
-    """Grant admin permissions to a user."""
+    """
+    Add or update an admin user's record.
+    
+    If the database pool is not initialized, the call is a no-op. The function records who granted admin and updates that information if the user already exists.
+    
+    Parameters:
+        user_id (int): ID of the user to grant admin privileges.
+        added_by (Optional[int]): ID of the user who granted admin privileges; stored or updated as the granter.
+    """
     if not pool:
         return
     async with pool.acquire() as conn:

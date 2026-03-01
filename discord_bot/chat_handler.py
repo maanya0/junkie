@@ -46,7 +46,22 @@ async def async_ask_junkie(
     images: list = None,
     client=None,
 ) -> str:
-    """Run the user's Team with improved error handling and response validation."""
+    """
+    Run a per-user Team to generate a response for the given prompt and return the generated text.
+    
+    Parameters:
+        user_text (str): The prompt or message text to process.
+        user_id (str): Identifier for the user invoking the Team; used to obtain or create the per-user Team.
+        session_id (str): Session identifier to correlate conversation context.
+        images (list, optional): List of image attachments (e.g., Image objects) to include as part of the input context.
+        client (optional): Optional client or SDK instance passed through when creating or retrieving the Team.
+    
+    Returns:
+        str: The Team-generated response text; if the Team returns no usable content, an apology message asking the user to rephrase is returned.
+    
+    Raises:
+        Exception: Propagates any exception raised while obtaining or running the Team after logging it.
+    """
     team = await get_or_create_team(user_id, client=client)
     try:
         result = await team.arun(
@@ -67,11 +82,28 @@ async def async_ask_junkie(
 
 
 def _normalize_mode(mode: Optional[str]) -> str:
+    """
+    Normalize an access-control mode name into a valid filter mode.
+    
+    Parameters:
+        mode (Optional[str]): Candidate mode string (may be None or empty).
+    
+    Returns:
+        "whitelist" or "blacklist" — the validated mode; defaults to "whitelist" when the input is missing or not one of the valid modes.
+    """
     normalized = (mode or "").strip().lower()
     return normalized if normalized in VALID_FILTER_MODES else "whitelist"
 
 
 def setup_chat(bot):
+    """
+    Configure chat behavior and register access-control commands and event handlers on the given bot.
+    
+    This function wires up runtime access-control state (whitelist/blacklist, admin and master users), command handlers for managing that state (status, mode/toggle, add/remove/list for access and admins, help), lifecycle handlers for startup and shutdown (including DB initialization, MCP setup, backfill and post-backfill message sync), and message events for caching, command dispatch, and a chatbot invocation (prompt construction, reply generation, mention/image handling, and chunked replies). It mutates in-memory access state and schedules background tasks as part of bot setup.
+    
+    Parameters:
+        bot: The bot instance to configure; event handlers and commands will be registered on this object.
+    """
     owner_id = BOT_OWNER_ID.strip() if BOT_OWNER_ID else ""
     access_state = {
         "mode": _normalize_mode(DEFAULT_USER_FILTER_MODE),
@@ -80,15 +112,46 @@ def setup_chat(bot):
     }
 
     def _is_master_user(user_id: int) -> bool:
+        """
+        Determine whether the given user ID is the configured master (bot owner).
+        
+        If a configured owner ID exists, the function checks against that value; otherwise it checks whether the ID matches the currently connected bot user's ID.
+        
+        Parameters:
+            user_id (int): Discord user ID to check.
+        
+        Returns:
+            `true` if the user is the master/owner, `false` otherwise.
+        """
         if owner_id:
             return str(user_id) == owner_id
         return bot.bot.user is not None and user_id == bot.bot.user.id
 
     def _is_admin_user(user_id: int) -> bool:
+        """
+        Determine whether the given user ID has administrative privileges for the bot.
+        
+        Parameters:
+            user_id (int): Discord user ID to check.
+        
+        Returns:
+            `true` if the user is an administrator or the configured master user, `false` otherwise.
+        """
         normalized = str(user_id)
         return _is_master_user(user_id) or normalized in access_state["admins"]
 
     def _is_authorized_user(user_id: int) -> bool:
+        """
+        Check whether a user is permitted to use chat features under the current access control settings.
+        
+        Master users are always permitted. In "blacklist" mode, users are permitted unless their ID is listed; in "whitelist" mode, users are permitted only if their ID is listed.
+        
+        Parameters:
+            user_id (int): Discord user ID to evaluate.
+        
+        Returns:
+            `true` if the user is authorized, `false` otherwise.
+        """
         if _is_master_user(user_id):
             return True
 
@@ -98,12 +161,25 @@ def setup_chat(bot):
         return normalized in access_state["ids"]
 
     async def _reload_access_state():
+        """
+        Reload the in-memory access_state from persistent storage.
+        
+        Fetches the configured access-control mode, the list of allowed/blocked user IDs, and the list of admin user IDs from the database, normalizes the mode, and updates access_state['mode'], access_state['ids'], and access_state['admins'] accordingly.
+        """
         db_mode = await get_access_control_mode(default_mode=_normalize_mode(DEFAULT_USER_FILTER_MODE))
         access_state["mode"] = _normalize_mode(db_mode)
         access_state["ids"] = await get_access_control_users()
         access_state["admins"] = await get_admin_users()
 
     def _access_summary() -> str:
+        """
+        Provides a compact summary of the current access-control state.
+        
+        The string includes the active mode, the count of configured access IDs, the count of admin IDs, and the master status ('configured' if an owner_id is set, otherwise 'fallback:self user').
+        
+        Returns:
+            str: Summary string in the form "mode=<mode>, access_ids=<count>, admins=<count>, master=<configured|fallback:self user>".
+        """
         return (
             f"mode={access_state['mode']}, access_ids={len(access_state['ids'])}, "
             f"admins={len(access_state['admins'])}, master={'configured' if owner_id else 'fallback:self user'}"
@@ -111,12 +187,27 @@ def setup_chat(bot):
 
     @bot.command("accessstatus")
     async def accessstatus(ctx):
+        """
+        Send the current access-control summary to the invoking channel when the message author is an admin.
+        
+        If the author is not an admin, the command does nothing (no message is sent).
+        """
         if not _is_admin_user(ctx.author.id):
             return
         await ctx.send(f"Access control status: {_access_summary()}")
 
     @bot.command("accessmode")
     async def accessmode(ctx, mode: str = ""):
+        """
+        Set or display the bot's access-control mode via an admin command.
+        
+        If called without a mode argument, sends the current access-control mode to the channel.
+        If a mode is provided, validates that it is either "whitelist" or "blacklist", updates the stored access-control mode, updates in-memory state, and sends a confirmation message. Invocation by non-admin users is ignored.
+        
+        Parameters:
+            ctx: The command invocation context (message and channel information).
+            mode (str): Desired access mode; expected values are "whitelist" or "blacklist". If empty, the current mode is shown.
+        """
         if not _is_admin_user(ctx.author.id):
             return
 
@@ -135,6 +226,14 @@ def setup_chat(bot):
 
     @bot.command("accesstoggle")
     async def accesstoggle(ctx):
+        """
+        Toggle the configured access-control mode between "whitelist" and "blacklist" and notify the command context.
+        
+        If the invoking user is an admin, updates the persistent access-control mode and the in-memory state, then sends a confirmation message to the provided command context. If the user is not an admin, the command is ignored.
+        
+        Parameters:
+            ctx: The command invocation context used to send the confirmation message.
+        """
         if not _is_admin_user(ctx.author.id):
             return
 
@@ -145,6 +244,16 @@ def setup_chat(bot):
 
     @bot.command("accessadd")
     async def accessadd(ctx, user_id: str = "", *, note: str = None):
+        """
+        Add a Discord user ID to the bot's access-control list.
+        
+        Validates that `user_id` contains only digits, persists the new access entry to the database (with an optional `note` and the command invoker as the adder), updates the in-memory access_state, and sends a confirmation message to the invoking context. If `user_id` is not numeric, sends a usage hint. The command is a no-op if the invoker is not an admin.
+        
+        Parameters:
+            ctx: The command context used to send responses and identify the invoker.
+            user_id (str): The Discord user ID to add.
+            note (str, optional): An optional note stored with the access entry.
+        """
         if not _is_admin_user(ctx.author.id):
             return
 
@@ -158,6 +267,14 @@ def setup_chat(bot):
 
     @bot.command("accessremove")
     async def accessremove(ctx, user_id: str = ""):
+        """
+        Remove a user ID from the bot's access-control list.
+        
+        This admin-only command validates that `user_id` is a numeric Discord user ID, prevents removing the configured master/owner override, removes the ID from persistent access-control storage, updates the in-memory access set, and sends a confirmation or usage message to the invoking context.
+        
+        Parameters:
+            user_id (str): The Discord user ID to remove from access control; expected as a string of digits.
+        """
         if not _is_admin_user(ctx.author.id):
             return
 
@@ -175,6 +292,11 @@ def setup_chat(bot):
 
     @bot.command("accesslist")
     async def accesslist(ctx):
+        """
+        List configured access-control user IDs to the invoking context's channel.
+        
+        If the caller is not an admin, the command takes no action. If no IDs are configured, sends a notice stating that. Otherwise sends a message containing the total count and up to the first 100 configured IDs, comma-separated.
+        """
         if not _is_admin_user(ctx.author.id):
             return
 
@@ -188,6 +310,15 @@ def setup_chat(bot):
 
     @bot.command("adminadd")
     async def adminadd(ctx, user_id: str = ""):
+        """
+        Add a Discord user ID to the bot's admin list and confirm the change to the invoking context.
+        
+        If the invoking user is not the configured master, no action is taken. If the provided user_id is not a numeric Discord ID, a usage message is sent. If the user_id matches the configured master/owner override, a notice is sent and no change is made. Otherwise the user_id is recorded as an admin (database update and in-memory state) and a confirmation message is sent to the context.
+        
+        Parameters:
+            ctx: The command invocation context; used to send response messages and to identify the caller.
+            user_id (str): The Discord user ID to add as an admin; must be a string of digits.
+        """
         if not _is_master_user(ctx.author.id):
             return
 
@@ -205,6 +336,15 @@ def setup_chat(bot):
 
     @bot.command("adminremove")
     async def adminremove(ctx, user_id: str = ""):
+        """
+        Remove a user from the bot's admin list.
+        
+        Attempts to remove the Discord user with the given user_id from persistent admin storage and the in-memory admin set, and sends a confirmation or usage message to the invoking context. If a master/owner override is configured, that user cannot be removed.
+        
+        Parameters:
+            ctx: The command invocation context used to send feedback to the caller.
+            user_id (str): Discord user ID string of the admin to remove; must be numeric.
+        """
         if not _is_master_user(ctx.author.id):
             return
 
@@ -222,6 +362,11 @@ def setup_chat(bot):
 
     @bot.command("adminlist")
     async def adminlist(ctx):
+        """
+        List configured admin user IDs and send the result to the invoking context.
+        
+        If the caller is not an admin this function does nothing. When an owner/master is configured, that ID is placed first in the list. Sends a summary message with up to the first 100 admin IDs, or a notice if no admins are configured.
+        """
         if not _is_admin_user(ctx.author.id):
             return
 
@@ -237,6 +382,14 @@ def setup_chat(bot):
 
     @bot.command("accesshelp")
     async def accesshelp(ctx):
+        """
+        Send a concise help message listing access-control and admin commands to the invoking channel.
+        
+        If the command author is not an admin, the function returns without sending anything.
+        
+        Parameters:
+            ctx (discord.ext.commands.Context): The command invocation context.
+        """
         if not _is_admin_user(ctx.author.id):
             return
 
@@ -248,6 +401,11 @@ def setup_chat(bot):
 
     @bot.event
     async def on_ready():
+        """
+        Perform startup initialization when the Discord client becomes ready.
+        
+        Initializes MCP tools, the database, and in-memory access state; computes the set of text and private channels to backfill; and schedules a background task that runs channel backfill followed by a post-backfill message synchronization (uses MESSAGE_SYNC_LIMIT environment variable to limit messages per channel). Logs startup progress and warns if the configured BOT_OWNER_ID (master override) is missing.
+        """
         logger.info("[on_ready] Bot ready event triggered!")
 
         if not owner_id:
@@ -274,6 +432,11 @@ def setup_chat(bot):
         logger.info(f"[on_ready] Found {len(text_channels)} channels to backfill")
 
         async def run_backfill_and_sync():
+            """
+            Run the backfill task and then perform a post-backfill message synchronization for the configured text channels.
+            
+            This starts the background backfill, waits for it to finish, then calls the message sync for the most recent messages. The number of messages synced is taken from the MESSAGE_SYNC_LIMIT environment variable (default 200). Progress and errors are logged; exceptions from the backfill/sync sequence are caught and logged.
+            """
             try:
                 logger.info("[on_ready] Starting backfill task...")
                 await start_backfill_task(text_channels)
@@ -305,6 +468,15 @@ def setup_chat(bot):
 
     @bot.event
     async def on_message(message):
+        """
+        Handle an incoming Discord message: process bot commands or, when prefixed with "!", run the chatbot flow and reply.
+        
+        This function appends the message to the local cache, delegates messages starting with the bot command prefix to the command processor, and for messages starting with "!" verifies authorization, builds conversational context (including reply context and image attachments), invokes the chat backend to generate a response, and sends the response back to the channel in chunks. Errors during reply generation are logged and result in a short error message sent to the channel. The handler also updates current channel context and logs key events.
+        
+        Parameters:
+            message: discord.Message
+                The incoming Discord message to process.
+        """
         await append_message_to_cache(message)
 
         if message.content.startswith(bot.prefix):
@@ -414,7 +586,11 @@ def setup_chat(bot):
 
 
 async def main_cli():
-    """CLI entrypoint — create a per-user Team and run its CLI app if available."""
+    """
+    Start the CLI entry point: initialize MCP tools and, if running in an interactive terminal, create a per-user Team and run its CLI application.
+    
+    If the process is not attached to a TTY, the CLI run is skipped and a message is printed. Ensures MCP tools are closed on exit; errors raised while closing are suppressed.
+    """
     await setup_mcp()
     try:
         if sys.stdin and sys.stdin.isatty():
