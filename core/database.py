@@ -1,12 +1,13 @@
 import asyncpg
 import logging
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Set
 from datetime import datetime
 from core.config import POSTGRES_URL
 
 logger = logging.getLogger(__name__)
 
 pool: Optional[asyncpg.Pool] = None
+
 
 async def init_db():
     """Initialize the database connection pool."""
@@ -19,6 +20,7 @@ async def init_db():
         logger.error(f"Failed to initialize database: {e}")
         raise
 
+
 async def close_db():
     """Close the database connection pool."""
     global pool
@@ -27,13 +29,15 @@ async def close_db():
         pool = None
         logger.info("Database connection pool closed.")
 
+
 async def create_schema():
     """Create the necessary database schema."""
     if not pool:
         return
-    
+
     async with pool.acquire() as conn:
-        await conn.execute("""
+        await conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS messages (
                 message_id BIGINT PRIMARY KEY,
                 channel_id BIGINT NOT NULL,
@@ -43,15 +47,15 @@ async def create_schema():
                 created_at TIMESTAMP WITH TIME ZONE NOT NULL,
                 timestamp_str TEXT NOT NULL
             );
-            
+
             -- Optimized index for fetching recent messages (DESC order)
             CREATE INDEX IF NOT EXISTS idx_messages_channel_created
             ON messages (channel_id, created_at DESC);
-            
+
             -- Index for message_id lookups (upserts)
             CREATE INDEX IF NOT EXISTS idx_messages_message_id
             ON messages (message_id);
-            
+
             -- Drop old ASC index if it exists
             DROP INDEX IF EXISTS idx_messages_channel_created_asc;
 
@@ -60,8 +64,29 @@ async def create_schema():
                 is_fully_backfilled BOOLEAN DEFAULT FALSE,
                 last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
-        """)
+
+            CREATE TABLE IF NOT EXISTS access_control_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS access_control_users (
+                user_id BIGINT PRIMARY KEY,
+                added_by BIGINT,
+                note TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS bot_admins (
+                user_id BIGINT PRIMARY KEY,
+                added_by BIGINT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        )
         logger.info("Database schema initialized with optimized indexes.")
+
 
 async def store_message(
     message_id: int,
@@ -70,7 +95,7 @@ async def store_message(
     author_name: str,
     content: str,
     created_at: datetime,
-    timestamp_str: str
+    timestamp_str: str,
 ):
     """Store or update a message in the database."""
     if not pool:
@@ -78,16 +103,26 @@ async def store_message(
 
     try:
         async with pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO messages (message_id, channel_id, author_id, author_name, content, created_at, timestamp_str)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (message_id) DO UPDATE SET
                     content = EXCLUDED.content,
                     timestamp_str = EXCLUDED.timestamp_str;
-            """, message_id, channel_id, author_id, author_name, content, created_at, timestamp_str)
+                """,
+                message_id,
+                channel_id,
+                author_id,
+                author_name,
+                content,
+                created_at,
+                timestamp_str,
+            )
     except Exception as e:
         logger.error(f"Failed to store message {message_id}: {e}")
-        raise  # Propagate error to caller instead of silently swallowing
+        raise
+
 
 async def delete_message(message_id: int):
     """Delete a message from the database."""
@@ -96,12 +131,16 @@ async def delete_message(message_id: int):
 
     try:
         async with pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 DELETE FROM messages WHERE message_id = $1
-            """, message_id)
+                """,
+                message_id,
+            )
             logger.debug(f"Deleted message {message_id} from database")
     except Exception as e:
         logger.error(f"Failed to delete message {message_id}: {e}")
+
 
 async def get_messages(channel_id: int, limit: int = 2000) -> List[Dict]:
     """Retrieve the most recent messages for a channel in chronological order."""
@@ -110,20 +149,22 @@ async def get_messages(channel_id: int, limit: int = 2000) -> List[Dict]:
 
     try:
         async with pool.acquire() as conn:
-            # ORDER BY DESC to get NEWEST messages first, then reverse to chronological
-            rows = await conn.fetch("""
+            rows = await conn.fetch(
+                """
                 SELECT message_id, channel_id, author_id, author_name, content, created_at
-                FROM messages 
-                WHERE channel_id = $1 
-                ORDER BY created_at DESC 
+                FROM messages
+                WHERE channel_id = $1
+                ORDER BY created_at DESC
                 LIMIT $2
-            """, channel_id, limit)
-            
-            # Reverse to chronological order (oldest to newest) for display
+                """,
+                channel_id,
+                limit,
+            )
             return list(reversed([dict(row) for row in rows]))
     except Exception as e:
         logger.error(f"Failed to get messages for channel {channel_id}: {e}")
         return []
+
 
 async def get_message_count(channel_id: int) -> int:
     """Get the number of messages stored for a channel."""
@@ -132,12 +173,16 @@ async def get_message_count(channel_id: int) -> int:
 
     try:
         async with pool.acquire() as conn:
-            return await conn.fetchval("""
+            return await conn.fetchval(
+                """
                 SELECT COUNT(*) FROM messages WHERE channel_id = $1
-            """, channel_id)
+                """,
+                channel_id,
+            )
     except Exception as e:
         logger.error(f"Failed to count messages for channel {channel_id}: {e}")
         return 0
+
 
 async def get_latest_message_id(channel_id: int) -> Optional[int]:
     """Get the ID of the newest message stored for a channel."""
@@ -146,15 +191,19 @@ async def get_latest_message_id(channel_id: int) -> Optional[int]:
 
     try:
         async with pool.acquire() as conn:
-            return await conn.fetchval("""
-                SELECT message_id FROM messages 
-                WHERE channel_id = $1 
-                ORDER BY created_at DESC 
+            return await conn.fetchval(
+                """
+                SELECT message_id FROM messages
+                WHERE channel_id = $1
+                ORDER BY created_at DESC
                 LIMIT 1
-            """, channel_id)
+                """,
+                channel_id,
+            )
     except Exception as e:
         logger.error(f"Failed to get latest message ID for channel {channel_id}: {e}")
         return None
+
 
 async def get_oldest_message_id(channel_id: int) -> Optional[int]:
     """Get the ID of the oldest message stored for a channel."""
@@ -163,15 +212,19 @@ async def get_oldest_message_id(channel_id: int) -> Optional[int]:
 
     try:
         async with pool.acquire() as conn:
-            return await conn.fetchval("""
-                SELECT message_id FROM messages 
-                WHERE channel_id = $1 
-                ORDER BY created_at ASC 
+            return await conn.fetchval(
+                """
+                SELECT message_id FROM messages
+                WHERE channel_id = $1
+                ORDER BY created_at ASC
                 LIMIT 1
-            """, channel_id)
+                """,
+                channel_id,
+            )
     except Exception as e:
         logger.error(f"Failed to get oldest message ID for channel {channel_id}: {e}")
         return None
+
 
 async def is_channel_fully_backfilled(channel_id: int) -> bool:
     """Check if a channel is marked as fully backfilled."""
@@ -179,12 +232,19 @@ async def is_channel_fully_backfilled(channel_id: int) -> bool:
         return False
     try:
         async with pool.acquire() as conn:
-            return await conn.fetchval("""
-                SELECT is_fully_backfilled FROM channel_status WHERE channel_id = $1
-            """, channel_id) or False
+            return (
+                await conn.fetchval(
+                    """
+                    SELECT is_fully_backfilled FROM channel_status WHERE channel_id = $1
+                    """,
+                    channel_id,
+                )
+                or False
+            )
     except Exception as e:
         logger.error(f"Failed to check backfill status for {channel_id}: {e}")
         return False
+
 
 async def mark_channel_fully_backfilled(channel_id: int, status: bool = True):
     """Mark a channel as fully backfilled."""
@@ -192,12 +252,132 @@ async def mark_channel_fully_backfilled(channel_id: int, status: bool = True):
         return
     try:
         async with pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO channel_status (channel_id, is_fully_backfilled, last_updated)
                 VALUES ($1, $2, CURRENT_TIMESTAMP)
                 ON CONFLICT (channel_id) DO UPDATE SET
                     is_fully_backfilled = EXCLUDED.is_fully_backfilled,
                     last_updated = EXCLUDED.last_updated;
-            """, channel_id, status)
+                """,
+                channel_id,
+                status,
+            )
     except Exception as e:
         logger.error(f"Failed to mark backfill status for {channel_id}: {e}")
+
+
+async def get_access_control_mode(default_mode: str = "whitelist") -> str:
+    """Return active access control mode from DB, or default if unset/invalid."""
+    if not pool:
+        return default_mode
+    try:
+        async with pool.acquire() as conn:
+            mode = await conn.fetchval(
+                """
+                SELECT value FROM access_control_settings WHERE key = 'mode'
+                """
+            )
+            if mode in {"whitelist", "blacklist"}:
+                return mode
+            return default_mode
+    except Exception as e:
+        logger.error(f"Failed to get access control mode: {e}")
+        return default_mode
+
+
+async def set_access_control_mode(mode: str):
+    """Persist access control mode."""
+    if not pool:
+        return
+    if mode not in {"whitelist", "blacklist"}:
+        raise ValueError("mode must be 'whitelist' or 'blacklist'")
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO access_control_settings (key, value, updated_at)
+            VALUES ('mode', $1, CURRENT_TIMESTAMP)
+            ON CONFLICT (key) DO UPDATE SET
+                value = EXCLUDED.value,
+                updated_at = EXCLUDED.updated_at;
+            """,
+            mode,
+        )
+
+
+async def get_access_control_users() -> Set[str]:
+    """Return configured access-control user IDs as strings."""
+    if not pool:
+        return set()
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT user_id FROM access_control_users")
+            return {str(row["user_id"]) for row in rows}
+    except Exception as e:
+        logger.error(f"Failed to get access control users: {e}")
+        return set()
+
+
+async def add_access_control_user(user_id: int, added_by: Optional[int] = None, note: Optional[str] = None):
+    """Add or update a user in the access-control set."""
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO access_control_users (user_id, added_by, note, created_at)
+            VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id) DO UPDATE SET
+                added_by = EXCLUDED.added_by,
+                note = EXCLUDED.note;
+            """,
+            user_id,
+            added_by,
+            note,
+        )
+
+
+async def remove_access_control_user(user_id: int):
+    """Remove a user from the access-control set."""
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM access_control_users WHERE user_id = $1", user_id)
+
+
+async def get_admin_users() -> Set[str]:
+    """Return additional admin IDs stored in DB."""
+    if not pool:
+        return set()
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT user_id FROM bot_admins")
+            return {str(row["user_id"]) for row in rows}
+    except Exception as e:
+        logger.error(f"Failed to get admin users: {e}")
+        return set()
+
+
+async def add_admin_user(user_id: int, added_by: Optional[int] = None):
+    """Grant admin permissions to a user."""
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO bot_admins (user_id, added_by, created_at)
+            VALUES ($1, $2, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id) DO UPDATE SET
+                added_by = EXCLUDED.added_by;
+            """,
+            user_id,
+            added_by,
+        )
+
+
+async def remove_admin_user(user_id: int):
+    """Revoke admin permissions from a user."""
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM bot_admins WHERE user_id = $1", user_id)

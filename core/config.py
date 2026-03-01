@@ -38,3 +38,7 @@ MCP_URLS = os.getenv("MCP_URLS", "").strip()
 CONTEXT_AGENT_MODEL = os.getenv("CONTEXT_AGENT_MODEL", "gemini-2.5-flash-lite")
 CONTEXT_AGENT_MAX_MESSAGES = int(os.getenv("CONTEXT_AGENT_MAX_MESSAGES", "50000"))
 TEAM_LEADER_CONTEXT_LIMIT = int(os.getenv("TEAM_LEADER_CONTEXT_LIMIT", "100"))
+
+# Access Control
+BOT_OWNER_ID = os.getenv("BOT_OWNER_ID", "").strip()
+DEFAULT_USER_FILTER_MODE = os.getenv("USER_FILTER_MODE", "whitelist").strip().lower()
