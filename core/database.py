@@ -19,11 +19,23 @@ async def init_db():
         Exception: If creating the connection pool or initializing the schema fails; the original exception is propagated.
     """
     global pool
+    if pool and not pool._closed:
+        logger.info("Database connection pool already initialized.")
+        return
+
+    new_pool: Optional[asyncpg.Pool] = None
     try:
-        pool = await asyncpg.create_pool(POSTGRES_URL)
+        new_pool = await asyncpg.create_pool(POSTGRES_URL)
+        pool = new_pool
         logger.info("Database connection pool created.")
         await create_schema()
     except Exception as e:
+        if new_pool is not None:
+            try:
+                await new_pool.close()
+            finally:
+                if pool is new_pool:
+                    pool = None
         logger.error(f"Failed to initialize database: {e}")
         raise
 
@@ -62,10 +74,6 @@ async def create_schema():
             -- Optimized index for fetching recent messages (DESC order)
             CREATE INDEX IF NOT EXISTS idx_messages_channel_created
             ON messages (channel_id, created_at DESC);
-
-            -- Index for message_id lookups (upserts)
-            CREATE INDEX IF NOT EXISTS idx_messages_message_id
-            ON messages (message_id);
 
             -- Drop old ASC index if it exists
             DROP INDEX IF EXISTS idx_messages_channel_created_asc;
