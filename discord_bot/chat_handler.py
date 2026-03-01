@@ -146,7 +146,7 @@ def setup_chat(bot):
         """
         Check whether a user is permitted to use chat features under the current access control settings.
         
-        Master users are always permitted. In "blacklist" mode, users are permitted unless their ID is listed; in "whitelist" mode, users are permitted only if their ID is listed.
+        Master users and admins are always permitted. In "blacklist" mode, other users are permitted unless their ID is listed; in "whitelist" mode, other users are permitted only if their ID is listed.
         
         Parameters:
             user_id (int): Discord user ID to evaluate.
@@ -154,7 +154,7 @@ def setup_chat(bot):
         Returns:
             `true` if the user is authorized, `false` otherwise.
         """
-        if _is_master_user(user_id):
+        if _is_admin_user(user_id):
             return True
 
         normalized = str(user_id)
