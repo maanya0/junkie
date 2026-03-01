@@ -1,5 +1,6 @@
 # chat_handler.py
 import asyncio
+import inspect
 import logging
 import os
 import sys
@@ -110,6 +111,7 @@ def setup_chat(bot):
         "ids": set(),
         "admins": set(),
     }
+    backfill_task: Optional[asyncio.Task] = None
 
     def _is_master_user(user_id: int) -> bool:
         """
@@ -144,7 +146,7 @@ def setup_chat(bot):
         """
         Check whether a user is permitted to use chat features under the current access control settings.
         
-        Master users are always permitted. In "blacklist" mode, users are permitted unless their ID is listed; in "whitelist" mode, users are permitted only if their ID is listed.
+        Master users and admins are always permitted. In "blacklist" mode, other users are permitted unless their ID is listed; in "whitelist" mode, other users are permitted only if their ID is listed.
         
         Parameters:
             user_id (int): Discord user ID to evaluate.
@@ -152,7 +154,7 @@ def setup_chat(bot):
         Returns:
             `true` if the user is authorized, `false` otherwise.
         """
-        if _is_master_user(user_id):
+        if _is_admin_user(user_id):
             return True
 
         normalized = str(user_id)
@@ -454,15 +456,31 @@ def setup_chat(bot):
             except Exception as e:
                 logger.error(f"[on_ready] Backfill/sync task failed: {e}", exc_info=True)
 
+        nonlocal backfill_task
+        if backfill_task and not backfill_task.done():
+            logger.info("[on_ready] Backfill+sync task is already running; skipping duplicate startup")
+            return
+
         logger.info(
             f"[on_ready] Creating backfill+sync background task for {len(text_channels)} channels..."
         )
-        asyncio.create_task(run_backfill_and_sync())
+        backfill_task = asyncio.create_task(run_backfill_and_sync())
         logger.info("[on_ready] Backfill+sync task created - running in background")
 
     @bot.event
     async def on_disconnect():
         """Clean shutdown of database connections and resources."""
+        nonlocal backfill_task
+        if backfill_task and not backfill_task.done():
+            logger.info("[on_disconnect] Cancelling backfill+sync background task...")
+            backfill_task.cancel()
+            try:
+                await backfill_task
+            except asyncio.CancelledError:
+                logger.info("[on_disconnect] Backfill+sync background task cancelled")
+            finally:
+                backfill_task = None
+
         logger.info("[on_disconnect] Bot disconnecting, closing database pool...")
         await close_db()
 
@@ -559,7 +577,9 @@ def setup_chat(bot):
                     )
                 except Exception as e:
                     logger.exception(f"[chatbot] Failed to generate reply for user {user_id}")
-                    await message.channel.send(f"**Error:** Failed to process request: {str(e)[:500]}")
+                    await message.channel.send(
+                        "An internal error occurred while processing your request. The team has been notified."
+                    )
                     return
 
                 end_time = time.time()
@@ -607,9 +627,8 @@ async def main_cli():
             try:
                 close_call = getattr(mcp, "close", None)
                 if close_call:
-                    if hasattr(close_call, "__await__"):
-                        await close_call()
-                    else:
-                        close_call()
+                    maybe_result = close_call()
+                    if inspect.isawaitable(maybe_result):
+                        await maybe_result
             except Exception:
                 pass
