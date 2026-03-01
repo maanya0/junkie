@@ -1,8 +1,11 @@
 import os
 import logging
 from core.config import TRACING_ENABLED, PHOENIX_API_KEY, PHOENIX_ENDPOINT, PHOENIX_PROJECT_NAME
+from core.metrics import get_llm_metrics_summary, get_llm_metrics
+from core.tool_cache import get_tool_cache_stats
 
 _phoenix_tracer = None
+logger = logging.getLogger(__name__)
 
 def setup_phoenix_tracing():
     """Lazy initialization of Phoenix tracing with optimizations."""
@@ -19,7 +22,6 @@ def setup_phoenix_tracing():
         from phoenix.otel import register
         
         if not PHOENIX_API_KEY:
-            logger = logging.getLogger(__name__)
             logger.warning("PHOENIX_API_KEY not set, skipping Phoenix tracing")
             _phoenix_tracer = False  # Mark as attempted but failed
             return None
@@ -39,17 +41,47 @@ def setup_phoenix_tracing():
         )
         
         _phoenix_tracer = tracer_provider
-        logger = logging.getLogger(__name__)
         logger.info(f"Phoenix tracing enabled (project: {PHOENIX_PROJECT_NAME})")
         
         return tracer_provider
     except ImportError:
-        logger = logging.getLogger(__name__)
         logger.warning("Phoenix tracing requested but 'phoenix' package not installed")
         _phoenix_tracer = False
         return None
     except Exception as e:
-        logger = logging.getLogger(__name__)
         logger.error(f"Failed to initialize Phoenix tracing: {e}", exc_info=True)
         _phoenix_tracer = False
         return None
+
+
+def log_system_metrics():
+    """Log system metrics for observability."""
+    # Log LLM metrics summary
+    llm_summary = get_llm_metrics_summary()
+    logger.info(
+        f"[SystemMetrics] LLM Calls: {llm_summary['total_calls']}, "
+        f"Total Tokens: {llm_summary['total_tokens']} "
+        f"({llm_summary['total_prompt_tokens']}/{llm_summary['total_completion_tokens']}), "
+        f"Avg Duration: {llm_summary['avg_duration_ms']:.2f}ms, "
+        f"Total Cost: {llm_summary['total_cost']:.6f}$"
+    )
+    
+    # Log tool cache stats
+    cache_stats = get_tool_cache_stats()
+    logger.info(f"[SystemMetrics] Tool Cache: {cache_stats['cache_size']} entries")
+
+
+def export_metrics_to_json() -> str:
+    """Export metrics to JSON string for debugging or reporting."""
+    import json
+    
+    llm_summary = get_llm_metrics_summary()
+    cache_stats = get_tool_cache_stats()
+    
+    metrics_data = {
+        "llm": llm_summary,
+        "tool_cache": cache_stats,
+    }
+    
+    return json.dumps(metrics_data, indent=2)
+

@@ -2,6 +2,7 @@ from agno.tools import Toolkit
 from agno.tools.function import ToolResult
 from agno.media import Image
 from core.execution_context import get_current_channel
+from core.tool_cache import get_cached_tool_result, cache_tool_result
 import logging
 import discord
 from typing import Optional, Union
@@ -114,6 +115,12 @@ class BioTools(Toolkit):
         Returns:
             str: A formatted string containing user details (username, display name, avatar URL, etc.), or an error message.
         """
+        # Check cache first
+        cached_result = get_cached_tool_result("get_user_details", (user_id,), {})
+        if cached_result:
+            logger.debug(f"[BioTools] Returning cached user details for {user_id}")
+            return cached_result
+            
         channel = get_current_channel()
         if not channel:
             return "Error: No execution context found. Cannot access Discord client."
@@ -197,7 +204,10 @@ class BioTools(Toolkit):
             except Exception as e:
                 logger.warning(f"[BioTools] Could not fetch full user profile: {e}")
             
-            return "\n".join(details)
+            result = "\n".join(details)
+            # Cache the result
+            cache_tool_result("get_user_details", (user_id,), {}, result, ttl=300)  # Cache for 5 minutes
+            return result
         
         except Exception as e:
             logger.error(f"[BioTools] Error getting user details: {e}", exc_info=True)
@@ -213,6 +223,12 @@ class BioTools(Toolkit):
         Returns:
             ToolResult: Contains the user's avatar image if found, or an error message.
         """
+        # Check cache first
+        cached_result = get_cached_tool_result("get_user_avatar", (user_id,), {})
+        if cached_result:
+            logger.debug(f"[BioTools] Returning cached user avatar for {user_id}")
+            return cached_result
+            
         channel = get_current_channel()
         if not channel:
             return ToolResult(content="Error: No execution context found. Cannot access Discord client.")
@@ -239,10 +255,13 @@ class BioTools(Toolkit):
                 original_prompt=f"Avatar of user {user.name} ({user_id})"
             )
             
-            return ToolResult(
+            result = ToolResult(
                 content=f"Here is the avatar for user {user.name} ({user_id})",
                 images=[image]
             )
+            # Cache the result
+            cache_tool_result("get_user_avatar", (user_id,), {}, result, ttl=300)  # Cache for 5 minutes
+            return result
         
         except Exception as e:
             logger.error(f"[BioTools] Error getting user avatar: {e}", exc_info=True)
