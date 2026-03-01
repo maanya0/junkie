@@ -1,59 +1,21 @@
 # .coderabbit.yaml
-# Language & general
 language: "en-US"
 early_access: false
 
-# Reviews configuration
 reviews:
-  # profile: 'performance' uses ruleset and tips focused on perf best-practices
-  profile: "assertive
-
-  # If true, CodeRabbit will automatically file "Request changes" reviews for
-  # issues it deems blocking. (set to true if you want strict enforcement)
+  profile: "assertive"
   request_changes_workflow: false
-
-  # Top-of-PR high level summary (you asked for this)
   high_level_summary: true
-
-  # Poem summary — disabled by default for a focused workflow
   poem: false
-
-  # Adds an overall pass/fail review status to the PR
   review_status: true
-
-  # Provide line-level / detailed comments (helpful for a performance review)
   review_details: true
-
-  # Auto-review behavior: enabled for all PRs and for drafts
+  
   auto_review:
     enabled: true
     drafts: true
-  ignore_usernames:
-      []
+    ignore_usernames: []
+    base_branches:
+      - ".*"
 
-  # Apply reviews to every branch in the repository
-  # Using "*" to include all branches (feature branches, dependabot, etc.)
-  branches:
-    include:
-      - "*"
-
-  # Performance-specific checks — reasonable defaults that CodeRabbit can use.
-  # These are illustrative and can be tuned/expanded as your repo needs.
-  performance:
-    enabled: true
-    checks:
-      - id: hotpath-large-allocs
-        description: "Flag large allocations in hot paths / loops"
-      - id: sync-io-in-async-context
-        description: "Detect blocking sync I/O inside async paths"
-      - id: expensive-startup-tasks
-        description: "Warn about heavy tasks during process startup"
-
-# Chat / PR comment settings
 chat:
-  # auto-reply to PR conversations when appropriate (you asked for this)
   auto_reply: true
-
-# Optional: remote shared config example if you later want central config
-# remote_config:
-#   url: "https://your-config-location/.coderabbit.yaml"
