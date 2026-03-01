@@ -1,5 +1,6 @@
 # chat_handler.py
 import logging
+import os
 import sys
 import time
 from discord_bot.discord_utils import resolve_mentions, restore_mentions, correct_mentions
@@ -21,6 +22,35 @@ import asyncio
 import discord
 
 logger = logging.getLogger(__name__)
+
+def _parse_user_id_set(env_var_name: str) -> set[str]:
+    return {
+        user_id.strip()
+        for user_id in os.getenv(env_var_name, "").split(",")
+        if user_id.strip()
+    }
+
+
+MASTER_USER_IDS = _parse_user_id_set("MASTER_USER_IDS")
+ADMIN_USER_IDS = _parse_user_id_set("ADMIN_USER_IDS")
+USER_WHITELIST = _parse_user_id_set("USER_WHITELIST")
+USER_BLACKLIST = _parse_user_id_set("USER_BLACKLIST")
+# Backward compatibility for previous allowlist naming.
+ALLOWED_USER_IDS = _parse_user_id_set("ALLOWED_USER_IDS")
+
+
+def _is_user_authorized(user_id: str) -> bool:
+    if user_id in ADMIN_USER_IDS:
+        return True
+
+    if user_id in MASTER_USER_IDS:
+        return True
+
+    effective_whitelist = USER_WHITELIST or ALLOWED_USER_IDS
+    if effective_whitelist:
+        return user_id in effective_whitelist
+
+    return user_id not in USER_BLACKLIST
 
 async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images: list = None, client=None) -> str:
     """
@@ -114,6 +144,14 @@ def setup_chat(bot):
         # Chatbot prefix (!) — handle via Team
         chatbot_prefix = "!"
         if message.content.startswith(chatbot_prefix):
+            if not _is_user_authorized(str(message.author.id)):
+                logger.warning(
+                    "[chatbot] Ignoring unauthorized user %s in channel %s",
+                    message.author.id,
+                    message.channel.id,
+                )
+                return
+
             # Step 1: replace mentions with readable form for context
             processed_content = resolve_mentions(message)
             
