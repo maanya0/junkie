@@ -122,11 +122,6 @@ def setup_chat(bot):
         chatbot_prefix = "!"
         if message.content.startswith(chatbot_prefix):
             if str(message.author.id) not in ALLOWED_USER_IDS:
-                logger.warning(
-                    "[chatbot] Ignoring unauthorized user %s in channel %s",
-                    message.author.id,
-                    message.channel.id,
-                )
                 return
 
             # Step 1: replace mentions with readable form for context
