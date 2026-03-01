@@ -13,7 +13,7 @@ from discord_bot.context_cache import (
     delete_message_from_cache,
     append_message_to_cache,
 )
-from core.config import TEAM_LEADER_CONTEXT_LIMIT
+from core.config import TEAM_LEADER_CONTEXT_LIMIT, ALLOWED_USER_IDS
 from core.execution_context import set_current_channel_id, set_current_channel
 from core.database import init_db, close_db
 from discord_bot.backfill import start_backfill_task
@@ -114,6 +114,10 @@ def setup_chat(bot):
         # Chatbot prefix (!) — handle via Team
         chatbot_prefix = "!"
         if message.content.startswith(chatbot_prefix):
+            # Check if user is authorized to invoke the agent
+            if str(message.author.id) not in ALLOWED_USER_IDS:
+                logger.info(f"[chatbot] Ignoring unauthorized message from user {message.author.id}")
+                return
             # Step 1: replace mentions with readable form for context
             processed_content = resolve_mentions(message)
             
