@@ -27,6 +27,9 @@ CACHE_TTL = int(os.getenv("CACHE_TTL", "120"))  # seconds
 from core.config import CONTEXT_AGENT_MAX_MESSAGES
 MAX_MESSAGES_IN_CACHE = CONTEXT_AGENT_MAX_MESSAGES
 
+# Sentinel value for empty messages (used in storage and checks)
+EMPTY_MESSAGE_SENTINEL = '[Empty message]'
+
 # Timezone configuration
 try:
     import pytz
@@ -124,7 +127,7 @@ def format_message_content(message) -> str:
         embed_count = len(embeds) if hasattr(embeds, '__len__') else 1
         content_parts.append(f"[{embed_count} embed(s)]")
     
-    return ' '.join(content_parts) if content_parts else '[Empty message]'
+    return ' '.join(content_parts) if content_parts else EMPTY_MESSAGE_SENTINEL
 
 
 # ──────────────────────────────────────────────
@@ -367,7 +370,7 @@ async def append_message_to_cache(message):
     content = format_message_content(message)
     
     # Only skip truly empty messages (no text, no attachments, no embeds)
-    if content == '[Empty message]':
+    if content == EMPTY_MESSAGE_SENTINEL:
         return
 
     timestamp_str = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
