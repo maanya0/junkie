@@ -18,9 +18,16 @@ async def init_db():
     Sets the module-level `pool` variable to a new asyncpg connection pool and creates any missing tables/indexes by invoking schema creation.
     
     Raises:
+        ValueError: If POSTGRES_URL is not configured.
         Exception: If creating the connection pool or initializing the schema fails; the original exception is propagated.
     """
     global pool
+    
+    # Validate POSTGRES_URL before attempting connection
+    if not POSTGRES_URL or not POSTGRES_URL.strip():
+        logger.error("POSTGRES_URL is not configured. Please set the POSTGRES_URL environment variable.")
+        raise ValueError("POSTGRES_URL environment variable is required but not set")
+    
     async with _init_lock:
         if pool and not pool.is_closing():
             logger.info("Database connection pool already initialized.")
@@ -161,22 +168,38 @@ async def store_message(
         raise
 
 
-async def delete_message(message_id: int):
-    """Delete a message from the database."""
+async def delete_message(message_id: int) -> bool:
+    """
+    Delete a message from the database.
+    
+    Args:
+        message_id: The message ID to delete.
+        
+    Returns:
+        bool: True if deletion succeeded, False otherwise.
+    """
     if not pool:
-        return
+        logger.warning(f"Cannot delete message {message_id}: database pool not initialized")
+        return False
 
     try:
         async with pool.acquire() as conn:
-            await conn.execute(
+            result = await conn.execute(
                 """
                 DELETE FROM messages WHERE message_id = $1
                 """,
                 message_id,
             )
-            logger.debug(f"Deleted message {message_id} from database")
+            # result is like "DELETE 1" or "DELETE 0"
+            deleted_count = int(result.split()[-1]) if result else 0
+            if deleted_count > 0:
+                logger.debug(f"Deleted message {message_id} from database")
+            else:
+                logger.debug(f"Message {message_id} not found in database (already deleted?)")
+            return True
     except Exception as e:
         logger.error(f"Failed to delete message {message_id}: {e}")
+        return False
 
 
 async def get_messages(channel_id: int, limit: int = 2000) -> List[Dict]:
@@ -408,31 +431,55 @@ async def get_access_control_users() -> Set[str]:
         return set()
 
 
-async def add_access_control_user(user_id: int, added_by: Optional[int] = None, note: Optional[str] = None):
-    """Add or update a user in the access-control set."""
+async def add_access_control_user(user_id: int, added_by: Optional[int] = None, note: Optional[str] = None) -> bool:
+    """
+    Add or update a user in the access-control set.
+    
+    Returns:
+        bool: True if operation succeeded, False otherwise.
+    """
     if not pool:
-        return
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO access_control_users (user_id, added_by, note, created_at)
-            VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-            ON CONFLICT (user_id) DO UPDATE SET
-                added_by = EXCLUDED.added_by,
-                note = EXCLUDED.note;
-            """,
-            user_id,
-            added_by,
-            note,
-        )
+        logger.warning(f"Cannot add access control user {user_id}: database pool not initialized")
+        return False
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO access_control_users (user_id, added_by, note, created_at)
+                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    added_by = EXCLUDED.added_by,
+                    note = EXCLUDED.note;
+                """,
+                user_id,
+                added_by,
+                note,
+            )
+            logger.info(f"Added/updated access control user {user_id} (added_by: {added_by})")
+            return True
+    except Exception as e:
+        logger.error(f"Failed to add access control user {user_id}: {e}")
+        return False
 
 
-async def remove_access_control_user(user_id: int):
-    """Remove a user from the access-control set."""
+async def remove_access_control_user(user_id: int) -> bool:
+    """
+    Remove a user from the access-control set.
+    
+    Returns:
+        bool: True if operation succeeded, False otherwise.
+    """
     if not pool:
-        return
-    async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM access_control_users WHERE user_id = $1", user_id)
+        logger.warning(f"Cannot remove access control user {user_id}: database pool not initialized")
+        return False
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM access_control_users WHERE user_id = $1", user_id)
+            logger.info(f"Removed access control user {user_id}")
+            return True
+    except Exception as e:
+        logger.error(f"Failed to remove access control user {user_id}: {e}")
+        return False
 
 
 async def get_admin_users() -> Set[str]:
@@ -453,34 +500,54 @@ async def get_admin_users() -> Set[str]:
         return set()
 
 
-async def add_admin_user(user_id: int, added_by: Optional[int] = None):
+async def add_admin_user(user_id: int, added_by: Optional[int] = None) -> bool:
     """
     Add or update an admin user's record.
     
-    If the database pool is not initialized, the call is a no-op. The function records who granted admin and updates that information if the user already exists.
-    
     Parameters:
         user_id (int): ID of the user to grant admin privileges.
-        added_by (Optional[int]): ID of the user who granted admin privileges; stored or updated as the granter.
+        added_by (Optional[int]): ID of the user who granted admin privileges.
+        
+    Returns:
+        bool: True if operation succeeded, False otherwise.
     """
     if not pool:
-        return
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO bot_admins (user_id, added_by, created_at)
-            VALUES ($1, $2, CURRENT_TIMESTAMP)
-            ON CONFLICT (user_id) DO UPDATE SET
-                added_by = EXCLUDED.added_by;
-            """,
-            user_id,
-            added_by,
-        )
+        logger.warning(f"Cannot add admin user {user_id}: database pool not initialized")
+        return False
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO bot_admins (user_id, added_by, created_at)
+                VALUES ($1, $2, CURRENT_TIMESTAMP)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    added_by = EXCLUDED.added_by;
+                """,
+                user_id,
+                added_by,
+            )
+            logger.info(f"Added/updated admin user {user_id} (added_by: {added_by})")
+            return True
+    except Exception as e:
+        logger.error(f"Failed to add admin user {user_id}: {e}")
+        return False
 
 
-async def remove_admin_user(user_id: int):
-    """Revoke admin permissions from a user."""
+async def remove_admin_user(user_id: int) -> bool:
+    """
+    Revoke admin permissions from a user.
+    
+    Returns:
+        bool: True if operation succeeded, False otherwise.
+    """
     if not pool:
-        return
-    async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM bot_admins WHERE user_id = $1", user_id)
+        logger.warning(f"Cannot remove admin user {user_id}: database pool not initialized")
+        return False
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM bot_admins WHERE user_id = $1", user_id)
+            logger.info(f"Removed admin user {user_id}")
+            return True
+    except Exception as e:
+        logger.error(f"Failed to remove admin user {user_id}: {e}")
+        return False
