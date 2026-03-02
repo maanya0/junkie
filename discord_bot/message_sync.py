@@ -46,9 +46,19 @@ async def sync_recent_messages(channel, sync_limit: int = 200):
         
         if deleted_ids:
             logger.info(f"[Sync] Found {len(deleted_ids)} deleted messages in {channel_name}")
+            delete_success = 0
+            delete_failed = 0
             for msg_id in deleted_ids:
-                await delete_message(msg_id)
-                logger.debug(f"[Sync] Deleted message {msg_id} from DB")
+                try:
+                    await delete_message(msg_id)
+                    logger.debug(f"[Sync] Deleted message {msg_id} from DB")
+                    delete_success += 1
+                except Exception as e:
+                    logger.error(f"[Sync] Failed to delete message {msg_id} from DB: {e}")
+                    delete_failed += 1
+            
+            if delete_failed > 0:
+                logger.warning(f"[Sync] Delete summary for {channel_name}: {delete_success} succeeded, {delete_failed} failed")
         
         # 5. Log sync summary
         updated_count = len(discord_message_ids & db_message_ids)
@@ -79,11 +89,15 @@ async def sync_all_channels(channels, sync_limit: int = 200):
     failed = 0
     
     for channel in channels:
+        channel_name = getattr(channel, 'name', 'DM')
         try:
             await sync_recent_messages(channel, sync_limit=sync_limit)
             synced += 1
         except Exception as e:
-            logger.error(f"[Sync] Failed to sync channel {channel.id}: {e}")
+            logger.error(
+                f"[Sync] Failed to sync channel {channel_name} ({channel.id}): {e}",
+                exc_info=True
+            )
             failed += 1
     
     logger.info(f"[Sync] ═══════════════════════════════════════")
