@@ -105,7 +105,7 @@
 | Tool | Capabilities |
 |------|-------------|
 | `BioTools` | `get_user_details`, `get_user_avatar` |
-| `HistoryTools` | `read_chat_history` (up to 2000 messages) |
+| `HistoryTools` | `read_chat_history` (up to 10000 messages) |
 | `E2BToolkit` | Sandbox lifecycle, code execution, file ops, server hosting |
 | `tools_factory.py` | MCP tools initialization |
 
@@ -126,7 +126,7 @@
 ```
 1. Discord message received (on_message)
 2. Message stored in Postgres (append_message_to_cache)
-3. If starts with "!": 
+3. If starts with "!":
    a. Check user authorization (whitelist/blacklist)
    b. Resolve mentions (@Name -> @Name(ID))
    c. Build context prompt from DB (recent messages + timestamps)
