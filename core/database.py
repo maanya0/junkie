@@ -10,6 +10,13 @@ logger = logging.getLogger(__name__)
 pool: Optional[asyncpg.Pool] = None
 _init_lock = asyncio.Lock()
 
+def _redact_id(user_id: int) -> str:
+    """Redact user ID for logging (shows first 4 and last 2 digits)."""
+    s = str(user_id)
+    if len(s) <= 6:
+        return "***"
+    return f"{s[:4]}...{s[-2:]}"
+
 
 async def init_db():
     """
@@ -161,22 +168,25 @@ async def store_message(
         raise
 
 
-async def delete_message(message_id: int):
+async def delete_message(message_id: int) -> bool:
     """Delete a message from the database."""
     if not pool:
-        return
+        return False
 
     try:
         async with pool.acquire() as conn:
-            await conn.execute(
+            result = await conn.execute(
                 """
                 DELETE FROM messages WHERE message_id = $1
                 """,
                 message_id,
             )
+            deleted_count = int(result.split()[-1]) if result else 0
             logger.debug(f"Deleted message {message_id} from database")
+            return deleted_count > 0
     except Exception as e:
         logger.error(f"Failed to delete message {message_id}: {e}")
+        return False
 
 
 async def get_messages(channel_id: int, limit: int = 2000) -> List[Dict]:
@@ -427,12 +437,14 @@ async def add_access_control_user(user_id: int, added_by: Optional[int] = None, 
         )
 
 
-async def remove_access_control_user(user_id: int):
+async def remove_access_control_user(user_id: int) -> bool:
     """Remove a user from the access-control set."""
     if not pool:
-        return
+        return False
     async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM access_control_users WHERE user_id = $1", user_id)
+        result = await conn.execute("DELETE FROM access_control_users WHERE user_id = $1", user_id)
+        deleted_count = int(result.split()[-1]) if result else 0
+        return deleted_count > 0
 
 
 async def get_admin_users() -> Set[str]:
@@ -478,9 +490,11 @@ async def add_admin_user(user_id: int, added_by: Optional[int] = None):
         )
 
 
-async def remove_admin_user(user_id: int):
+async def remove_admin_user(user_id: int) -> bool:
     """Revoke admin permissions from a user."""
     if not pool:
-        return
+        return False
     async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM bot_admins WHERE user_id = $1", user_id)
+        result = await conn.execute("DELETE FROM bot_admins WHERE user_id = $1", user_id)
+        deleted_count = int(result.split()[-1]) if result else 0
+        return deleted_count > 0

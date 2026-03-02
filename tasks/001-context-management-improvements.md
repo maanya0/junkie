@@ -1,8 +1,8 @@
 # Task 001: Context Management Improvements
 
-**Status**: 📋 Planning  
-**Priority**: High  
-**Created**: 2026-03-02  
+**Status**: 📋 Planning
+**Priority**: High
+**Created**: 2026-03-02
 **Branch**: `feature/context-improvements` (to be created)
 
 ---
@@ -17,7 +17,7 @@ Improve user experience and reduce hallucinations caused by improper context man
 
 ### Current Architecture
 
-```
+```text
 Discord Message → append_message_to_cache() → PostgreSQL
                          ↓
                   build_context_prompt()
@@ -68,12 +68,12 @@ Discord Message → append_message_to_cache() → PostgreSQL
 > "Messages are in chronological order (oldest to newest)"
 > "The LAST message in the conversation is the CURRENT message"
 
-**Reality**: 
+**Reality**:
 - DB fetch doesn't filter by `before_message`, so newer messages can appear
 - If messages are edited/deleted during prompt building, ordering can shift
 - No explicit marker distinguishing "history" from "current message"
 
-**Fix Strategy**: 
+**Fix Strategy**:
 - Add `before_id` filter to `get_messages()` DB query
 - Add clear `--- CURRENT MESSAGE ---` delimiter in prompt
 - Include message count and completeness indicator
@@ -114,6 +114,7 @@ Discord Message → append_message_to_cache() → PostgreSQL
 
 ```python
 # core/database.py
+
 async def get_messages(channel_id: int, limit: int = 2000, before_id: int = None) -> List[Dict]:
     query = """
         SELECT message_id, channel_id, author_id, author_name, content, created_at, timestamp_str
@@ -134,22 +135,23 @@ async def get_messages(channel_id: int, limit: int = 2000, before_id: int = None
 
 ```python
 # discord_bot/context_cache.py
+
 def format_message_content(message) -> str:
     """Unified message content formatter."""
     content = message.clean_content or ""
-    
+
     # Add attachment indicators
     if message.attachments:
         att_summary = ", ".join(
-            f"[{a.content_type or 'file'}: {a.filename}]" 
+            f"[{a.content_type or 'file'}: {a.filename}]"
             for a in message.attachments
         )
         content = f"{content} {att_summary}".strip()
-    
+
     # Add embed indicators
     if message.embeds:
         content = f"{content} [+{len(message.embeds)} embed(s)]".strip()
-    
+
     return content or "[Empty message]"
 ```
 
@@ -157,11 +159,12 @@ def format_message_content(message) -> str:
 
 ```python
 # discord_bot/context_cache.py
+
 async def build_context_prompt(...) -> str:
     # ...
-    
+
     completeness = "complete" if len(history) >= limit else f"partial ({len(history)}/{limit} available)"
-    
+
     prompt_parts = [
         f"Channel: #{channel_name} ({channel_id}) in {guild_name}",
         f"Current Time: {now_str} (IST)",
@@ -188,15 +191,16 @@ async def build_context_prompt(...) -> str:
 
 ```python
 # discord_bot/context_cache.py
+
 async def build_context_prompt(..., reply_to_message=None) -> str:
     history = await get_recent_context(...)
-    
+
     # Check if reply target is already in history
     reply_in_history = False
     if reply_to_message:
         reply_id = str(reply_to_message.id)
         reply_in_history = any(reply_id in line for line in history)
-    
+
     # Only add reply context block if not already present
     if reply_to_message and not reply_in_history:
         prompt_parts.append(f"[REPLY CONTEXT: {format_reply(reply_to_message)}]")
@@ -206,6 +210,7 @@ async def build_context_prompt(..., reply_to_message=None) -> str:
 
 ```python
 # discord_bot/chat_handler.py
+
 if message.reference and message.reference.message_id:
     try:
         reply_to_message = await message.channel.fetch_message(message.reference.message_id)
@@ -219,6 +224,7 @@ if message.reference and message.reference.message_id:
 
 ```python
 # discord_bot/chat_handler.py
+
 unsupported = [a for a in message.attachments if not a.content_type or not a.content_type.startswith('image/')]
 if unsupported:
     await message.add_reaction('📎')  # Indicate attachment acknowledged but not processed
@@ -241,10 +247,10 @@ if unsupported:
 
 async def test_before_id_filter():
     """Ensure messages after before_id are excluded."""
-    
+
 async def test_content_format_consistency():
     """Verify all storage paths produce same format."""
-    
+
 async def test_completeness_indicator():
     """Check partial context is marked correctly."""
 ```
@@ -320,7 +326,7 @@ async def test_completeness_indicator():
 ## Open Questions
 
 1. ~~**Session scope**~~: **RESOLVED** - Per-channel is correct for group chatbot design.
-   
+
 2. **Attachment handling**: Should we extract text from PDFs/documents?
    - Would require additional dependencies (PyPDF2, etc.)
    - Could delegate to code-agent for processing

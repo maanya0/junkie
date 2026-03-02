@@ -67,7 +67,7 @@
 │  │(env vars)  │  │(Postgres)  │  │(contextvars)│ │(Phoenix)  │ │
 │  └────────────┘  └────────────┘  └────────────┘  └──────────┘ │
 └─────────────────────────────────────────────────────────────────┘
-```
+```text
 
 ## Key Components
 
@@ -123,7 +123,7 @@
 
 ### Message Handling
 
-```
+```text
 1. Discord message received (on_message)
 2. Message stored in Postgres (append_message_to_cache)
 3. If starts with "!":
@@ -135,17 +135,17 @@
    f. Call Team.arun() with prompt
    g. Restore mentions in response
    h. Send chunked reply (<=2000 chars)
-```
+```text
 
 ### Backfill Strategy
 
-```
+```text
 1. On startup: start_backfill_task for accessible channels
 2. Catch-up: Fetch messages after latest stored ID
 3. Deepen: Fetch messages before oldest stored ID
 4. Mark channel "fully backfilled" when no more history
 5. Post-backfill sync: Compare recent Discord history to DB
-```
+```text
 
 ## Branch Differences (dev1 → team)
 
@@ -164,7 +164,7 @@
 
 ## Configuration (`.env`)
 
-```
+```text
 POSTGRES_URL=           # Database connection
 DISCORD_TOKEN=          # Self-bot token
 PROVIDER=               # Model provider URL
@@ -174,7 +174,7 @@ GROQ_API_KEY=
 FIRECRAWL_API_KEY=      # Optional, enables Firecrawl MCP
 BOT_OWNER_ID=           # Master admin
 DEFAULT_USER_FILTER_MODE= # whitelist or blacklist
-```
+```text
 
 ## Dependencies
 
