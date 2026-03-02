@@ -146,7 +146,7 @@ async def get_recent_context(channel, limit: int = 500, before_message=None) -> 
         formatted.append(f"{rel_time} {m['author_name']}({m['author_id']}): {m['content']}")
     return formatted
 
-async def fetch_and_cache_from_api(channel, limit, before_message=None, after_message=None):
+async def fetch_and_cache_from_api(channel, limit, before_message=None, after_message=None, raise_on_error=False):
     """Helper to fetch from API and cache to DB."""
     try:
         channel_name = getattr(channel, "name", "DM")
@@ -232,9 +232,13 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
         return formatted
     except discord.errors.Forbidden:
         logger.warning(f"[fetch_and_cache] Missing access to channel {channel.id}. Skipping.")
+        if raise_on_error:
+            raise
         return []
     except Exception as e:
         logger.error(f"[fetch_and_cache] Error: {e}", exc_info=True)
+        if raise_on_error:
+            raise
         return []
 
 
