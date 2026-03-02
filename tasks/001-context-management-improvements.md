@@ -38,7 +38,7 @@ Discord Message → append_message_to_cache() → PostgreSQL
 | **Future message leak** | `get_recent_context()` ignores `before_message` in DB fetch, potentially including messages sent AFTER the current one | Model sees "future" context, leading to temporal confusion |
 | **Inconsistent content storage** | `append_message_to_cache()` stores `clean_content` (no attachments), but `update_message_in_cache()` stores with attachments | Edited messages have different format than original |
 | **Incomplete history marker missing** | When DB has fewer messages than requested and backfill fails, no indicator is added | Model assumes it has full context when it doesn't |
-| **Session ID is channel-based** | `session_id=str(message.channel.id)` causes all users in a channel to share session state | Cross-user context bleed in multi-user channels |
+| ~~**Session ID is channel-based**~~ | ~~`session_id=str(message.channel.id)`~~ | **INTENDED**: Group chatbot - shared context is correct |
 
 #### 🟠 High (Degrades UX)
 
@@ -93,17 +93,16 @@ Discord Message → append_message_to_cache() → PostgreSQL
 - Update all storage paths to use the same formatter
 - Add attachment metadata to formatted output when relevant
 
-### 3. Session Isolation
+### 3. Session Scope (NOT AN ISSUE)
 
-**Problem**: All users in a channel share one session via `session_id=str(channel.id)`
+**Design Intent**: This is a **group chatbot** where all users in a channel share context.
 
-**Impact**: 
-- User A's conversation history bleeds into User B's session
-- Memory manager may confuse user contexts
+**Current Behavior** (`session_id=str(channel.id)`): ✅ **CORRECT**
+- All users see shared conversation history
+- Bot can reference what any user said
+- Memory is channel-scoped (appropriate for group context)
 
-**Fix Strategy**:
-- Change to `session_id=f"{channel.id}:{user.id}"` for per-user-per-channel isolation
-- Or use `session_id=str(user.id)` for global per-user sessions
+**No change needed** - shared sessions are intentional.
 
 ---
 
@@ -176,16 +175,12 @@ async def build_context_prompt(...) -> str:
     ]
 ```
 
-#### 1.4 Fix session isolation
+#### 1.4 ~~Fix session isolation~~ (NO CHANGE NEEDED)
 
-```python
-# discord_bot/chat_handler.py
-# Change from:
-session_id=str(message.channel.id)
-
-# To:
-session_id=f"{message.channel.id}:{message.author.id}"
-```
+**Group chatbot design**: Shared channel sessions are intentional.
+- `session_id=str(message.channel.id)` is correct
+- All users should share context in group conversations
+- Bot can reference "what Alice said earlier" when Bob asks
 
 ### Phase 2: UX Improvements (PR #2)
 
@@ -266,9 +261,10 @@ async def test_completeness_indicator():
 | Scenario | Expected Behavior |
 |----------|-------------------|
 | Ask "what did I just say?" | Bot refers to user's previous message, not future ones |
-| Two users chatting simultaneously | Each user's responses are contextually appropriate to their own history |
+| User A asks "what did B say?" | Bot correctly references B's messages in shared context |
 | Reply to message from 2 hours ago | Bot acknowledges the reply context correctly |
 | Send image with no text | Bot acknowledges image in context |
+| Group discussion with 5 users | Bot tracks all participants correctly |
 
 ---
 
@@ -280,8 +276,7 @@ async def test_completeness_indicator():
 - [ ] Create `format_message_content()` helper
 - [ ] Apply formatter to all storage paths
 - [ ] Add `--- CURRENT MESSAGE ---` delimiter
-- [ ] Add context completeness indicator  
-- [ ] Change session_id to per-user-per-channel
+- [ ] Add context completeness indicator
 - [ ] Write unit tests
 
 ### PR #2: UX Improvements (Est: 2-3 hours)
@@ -303,7 +298,7 @@ async def test_completeness_indicator():
 |--------|---------|--------|
 | Temporal confusion reports | Unknown | 0 |
 | "Wrong context" user complaints | Unknown | -80% |
-| Session bleed incidents | Unknown | 0 |
+| Multi-user attribution accuracy | Unknown | 100% |
 | Attachment visibility | Partial | Full |
 
 ---
@@ -321,9 +316,7 @@ async def test_completeness_indicator():
 
 ## Open Questions
 
-1. **Session scope**: Should sessions be per-user-per-channel or per-user globally?
-   - Per-channel: Better for channel-specific context
-   - Per-user: Better for cross-channel memory continuity
+1. ~~**Session scope**~~: **RESOLVED** - Per-channel is correct for group chatbot design.
    
 2. **Attachment handling**: Should we extract text from PDFs/documents?
    - Would require additional dependencies (PyPDF2, etc.)
