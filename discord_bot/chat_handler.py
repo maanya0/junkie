@@ -515,8 +515,6 @@ def setup_chat(bot):
 
             processed_content = resolve_mentions(message)
             raw_prompt = processed_content[len(chatbot_prefix) :].strip()
-            if not raw_prompt:
-                return
 
             logger.info(
                 f"[chatbot] Building context for channel {message.channel.id}, user {message.author.id}"
@@ -542,18 +540,54 @@ def setup_chat(bot):
             )
             logger.info(f"[chatbot] Context prompt built, length: {len(prompt)} characters")
 
+            # Process attachments - images go to model, others get noted
+            # Image extensions to check when content_type is missing
+            IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.svg')
+            
+            def _is_image_attachment(att) -> bool:
+                """Check if attachment is an image by content_type or file extension."""
+                # Check content_type first
+                if att.content_type and att.content_type.startswith("image/"):
+                    return True
+                # Fallback: check filename extension
+                if att.filename and att.filename.lower().endswith(IMAGE_EXTENSIONS):
+                    return True
+                # Fallback: check URL extension
+                if att.url:
+                    url_lower = att.url.lower().split('?')[0]  # Remove query params
+                    if url_lower.endswith(IMAGE_EXTENSIONS):
+                        return True
+                return False
+            
             images = []
+            non_image_attachments = []
+            
             if message.attachments:
                 for attachment in message.attachments:
-                    if attachment.content_type and attachment.content_type.startswith("image/"):
+                    if _is_image_attachment(attachment):
                         images.append(Image(url=attachment.url))
-                        logger.info(f"[chatbot] Found image attachment: {attachment.url}")
+                        logger.info("[chatbot] Found image attachment: %s", attachment.url)
+                    else:
+                        # Track non-image attachments (PDFs, documents, etc.)
+                        non_image_attachments.append(attachment)
+                        logger.info("[chatbot] Non-image attachment: %s (%s)", attachment.filename, attachment.content_type)
 
             if reply_to_message and reply_to_message.attachments:
                 for attachment in reply_to_message.attachments:
-                    if attachment.content_type and attachment.content_type.startswith("image/"):
+                    if _is_image_attachment(attachment):
                         images.append(Image(url=attachment.url))
-                        logger.info(f"[chatbot] Found reply image attachment: {attachment.url}")
+                        logger.info("[chatbot] Found reply image attachment: %s", attachment.url)
+            
+            # Add reaction to acknowledge non-image attachments (user feedback)
+            if non_image_attachments:
+                try:
+                    await message.add_reaction('\U0001F4CE')  # 📎 paperclip emoji
+                    logger.info("[chatbot] Added paperclip reaction for %d non-image attachment(s)", len(non_image_attachments))
+                except (discord.Forbidden, discord.HTTPException, discord.NotFound) as e:
+                    logger.warning("[chatbot] Failed to add attachment reaction: %s", e)
+
+            if not raw_prompt and not message.attachments:
+                return
 
             async with message.channel.typing():
                 user_id = str(message.author.id)
