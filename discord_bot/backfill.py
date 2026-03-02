@@ -57,9 +57,18 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
             else:
                 # No data, full fetch
                 logger.info(f"[Backfill] ⚡ No existing data for {channel_name}. Performing initial fetch...")
-                fetched_count = len(await fetch_and_cache_from_api(channel, limit=target_limit))
+                try:
+                    initial_messages = await fetch_and_cache_from_api(channel, limit=target_limit)
+                    fetched_count = len(initial_messages)
+                    logger.info(f"[Backfill] Initial fetch for {channel_name} returned {fetched_count} messages")
+                except discord.errors.Forbidden:
+                    logger.warning(f"[Backfill] Missing access to channel {channel_name} ({channel_id}). Skipping.")
+                    return
+                except Exception as e:
+                    logger.error(f"[Backfill] Initial fetch failed for {channel_name}: {e}", exc_info=True)
+                    return  # Can't proceed without initial data
+                
                 current_count = await get_message_count(channel_id)
-                oldest_id = await get_oldest_message_id(channel_id)  # Update oldest_id after fetch
                 oldest_id = await get_oldest_message_id(channel_id)  # Update oldest_id after fetch
                 
                 # Only mark as fully backfilled if we fetched ZERO messages (reached end of history)
