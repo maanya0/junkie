@@ -515,7 +515,27 @@ def setup_chat(bot):
 
             processed_content = resolve_mentions(message)
             raw_prompt = processed_content[len(chatbot_prefix) :].strip()
-            if not raw_prompt:
+
+            # Process attachments - images go to model, others get noted
+            images = []
+            non_image_attachments = []
+            
+            if message.attachments:
+                for attachment in message.attachments:
+                    if attachment.content_type and attachment.content_type.startswith("image/"):
+                        images.append(Image(url=attachment.url))
+                        logger.info(f"[chatbot] Found image attachment: {attachment.url}")
+                    else:
+                        # Track non-image attachments (PDFs, documents, etc.)
+                        non_image_attachments.append(attachment)
+                        logger.info(f"[chatbot] Non-image attachment: {attachment.filename} ({attachment.content_type})")
+                
+                # Add attachment summary to raw_prompt
+                att_list = [f"{a.filename} ({a.content_type or 'unknown'})" for a in message.attachments]
+                attachment_summary = f"\n[Attachments: {', '.join(att_list)}]"
+                raw_prompt = raw_prompt + attachment_summary
+
+            if not raw_prompt.strip():
                 return
 
             logger.info(
@@ -541,20 +561,6 @@ def setup_chat(bot):
                 reply_to_message=reply_to_message,
             )
             logger.info(f"[chatbot] Context prompt built, length: {len(prompt)} characters")
-
-            # Process attachments - images go to model, others get noted
-            images = []
-            non_image_attachments = []
-            
-            if message.attachments:
-                for attachment in message.attachments:
-                    if attachment.content_type and attachment.content_type.startswith("image/"):
-                        images.append(Image(url=attachment.url))
-                        logger.info(f"[chatbot] Found image attachment: {attachment.url}")
-                    else:
-                        # Track non-image attachments (PDFs, documents, etc.)
-                        non_image_attachments.append(attachment)
-                        logger.info(f"[chatbot] Non-image attachment: {attachment.filename} ({attachment.content_type})")
 
             if reply_to_message and reply_to_message.attachments:
                 for attachment in reply_to_message.attachments:
