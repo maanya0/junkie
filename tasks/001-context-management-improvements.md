@@ -309,7 +309,7 @@ async def test_completeness_indicator():
 |------|--------|
 | `core/database.py` | Add `before_id` filter |
 | `discord_bot/context_cache.py` | Format consistency, completeness indicator, dedup |
-| `discord_bot/chat_handler.py` | Session ID fix, reply warning, attachment notification |
+| `discord_bot/chat_handler.py` | Reply warning, attachment notification |
 | `requirements.txt` | Add pytz as required (or document Python 3.9+ for zoneinfo) |
 
 ---

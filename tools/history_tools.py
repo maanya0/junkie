@@ -8,6 +8,8 @@ import asyncio
 logger = logging.getLogger(__name__)
 
 class HistoryTools(Toolkit):
+    MIN_LIMIT = 1
+
     def __init__(self):
         super().__init__(name="history_tools")
         self.register(self.read_chat_history)
@@ -22,6 +24,9 @@ class HistoryTools(Toolkit):
         Returns:
             str: The chat history as a string, or a message indicating no history found.
         """
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < self.MIN_LIMIT:
+            return f"Error: limit must be an integer >= {self.MIN_LIMIT}."
+
         # Get channel object from execution context
         channel = get_current_channel()
         
@@ -34,14 +39,19 @@ class HistoryTools(Toolkit):
             logger.warning(f"[HistoryTools] Channel object missing, falling back to DB-only for ID {channel_id}")
             
             # Use DB directly
-            db_messages = await get_messages(channel_id, limit)
-            if not db_messages:
-                return "No history found in database."
-                
-            formatted = []
-            for m in db_messages:
-                formatted.append(f"{m['timestamp_str']} {m['author_name']}({m['author_id']}): {m['content']}")
-            return "\n".join(formatted)
+            try:
+                db_messages = await get_messages(channel_id, limit)
+                if not db_messages:
+                    return "No history found in database."
+
+                formatted = []
+                for m in db_messages:
+                    ts = m.get("timestamp_str") or str(m.get("created_at", ""))
+                    formatted.append(f"{ts} {m['author_name']}({m['author_id']}): {m['content']}")
+                return "\n".join(formatted)
+            except Exception as e:
+                logger.error(f"[HistoryTools] Error fetching history from database: {e}", exc_info=True)
+                return "Error fetching history from database"
 
         logger.info(f"[HistoryTools] Fetching history for channel {channel.id} with limit {limit}")
         
@@ -51,4 +61,4 @@ class HistoryTools(Toolkit):
             return "\n".join(history_lines)
         except Exception as e:
             logger.error(f"[HistoryTools] Error fetching history: {e}", exc_info=True)
-            return f"Error fetching history: {str(e)}"
+            return "Error fetching history"
