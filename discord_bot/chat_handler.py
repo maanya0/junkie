@@ -515,8 +515,6 @@ def setup_chat(bot):
 
             processed_content = resolve_mentions(message)
             raw_prompt = processed_content[len(chatbot_prefix) :].strip()
-            if not raw_prompt:
-                return
 
             logger.info(
                 f"[chatbot] Building context for channel {message.channel.id}, user {message.author.id}"
@@ -587,6 +585,9 @@ def setup_chat(bot):
                     logger.info("[chatbot] Added paperclip reaction for %d non-image attachment(s)", len(non_image_attachments))
                 except (discord.Forbidden, discord.HTTPException, discord.NotFound) as e:
                     logger.warning("[chatbot] Failed to add attachment reaction: %s", e)
+
+            if not raw_prompt and not message.attachments:
+                return
 
             async with message.channel.typing():
                 user_id = str(message.author.id)

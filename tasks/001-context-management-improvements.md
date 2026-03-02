@@ -271,6 +271,7 @@ async def test_completeness_indicator():
 ## Implementation Plan
 
 ### PR #1: Critical Fixes (Est: 4-6 hours)
+
 - [ ] Add `before_id` to `get_messages()` in `core/database.py`
 - [ ] Update `get_recent_context()` to pass `before_message.id`
 - [ ] Create `format_message_content()` helper
@@ -280,12 +281,14 @@ async def test_completeness_indicator():
 - [ ] Write unit tests
 
 ### PR #2: UX Improvements (Est: 2-3 hours)
+
 - [ ] Deduplicate reply context
 - [ ] Add reply fetch failure warning
 - [ ] Add unsupported attachment notification
 - [ ] Response chunking improvements (remove prefix spam)
 
 ### PR #3: Edge Cases (Est: 2 hours)
+
 - [ ] Require pytz or use zoneinfo
 - [ ] Add retry logic for API failures
 - [ ] Consistent empty message handling

@@ -6,7 +6,7 @@
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                         main.py                                  │
 │                    (Entry point, SelfBot)                        │
@@ -122,6 +122,7 @@
 ## Data Flow
 
 ### Message Handling
+
 ```
 1. Discord message received (on_message)
 2. Message stored in Postgres (append_message_to_cache)
@@ -137,6 +138,7 @@
 ```
 
 ### Backfill Strategy
+
 ```
 1. On startup: start_backfill_task for accessible channels
 2. Catch-up: Fetch messages after latest stored ID
@@ -154,6 +156,7 @@
 | `agent/agent_factory.py` | -123 lines: Simplified, removed some redundancy |
 
 ### Key `team` branch additions:
+
 - **Access Control**: Whitelist/blacklist user filtering
 - **Admin System**: Bot owner + admin users with elevated privileges
 - **Commands**: `.status`, `.mode`, `.add`, `.remove`, `.list`, `.help`
