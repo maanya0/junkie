@@ -13,7 +13,7 @@ from discord_bot.context_cache import (
     delete_message_from_cache,
     append_message_to_cache,
 )
-from core.config import TEAM_LEADER_CONTEXT_LIMIT
+from core.config import TEAM_LEADER_CONTEXT_LIMIT, ALLOWED_USER_IDS
 from core.execution_context import set_current_channel_id, set_current_channel
 from core.database import init_db, close_db
 from discord_bot.backfill import start_backfill_task
@@ -49,6 +49,15 @@ async def async_ask_junkie(user_text: str, user_id: str, session_id: str, images
 
 
 def setup_chat(bot):
+    """
+    Register Discord event handlers on the provided bot to wire MCP tools, database lifecycle, message caching, and the team-based chatbot.
+    
+    This attaches handlers for:
+    - on_ready: initializes MCP tools and the database, collects channels, and starts a background backfill + post-backfill message sync task.
+    - on_disconnect: closes database connections and performs clean shutdown work.
+    - on_message: updates the message cache, allows normal command processing, and when messages start with the chatbot prefix, enforces authorization, builds a context-aware prompt (including reply context and images), invokes the user's Team to generate a reply, restores mentions, and sends the reply in chunks.
+    - on_message_edit / on_message_delete: keep the cache in sync with edits and deletions.
+    """
     @bot.event
     async def on_ready():
         logger.info("[on_ready] Bot ready event triggered!")
@@ -104,6 +113,14 @@ def setup_chat(bot):
     @bot.event
     async def on_message(message):
         # Update cache with new message (both user and bot messages for full context)
+        """
+        Handle an incoming Discord message: update cache, route commands, or invoke the chatbot Team for messages starting with "!" and send the generated reply.
+        
+        Processes the provided Discord message by updating the local cache, delegating standard bot commands to the bot framework, and—when the message begins with the chatbot prefix ("!")—verifying authorization, building a context-aware prompt (including reply context and image attachments), running the user's Team to produce a reply, restoring mentions, and sending the reply in appropriately sized chunks. Errors during Team execution are logged and a truncated error message is sent to the channel.
+        
+        Parameters:
+            message (discord.Message): The incoming Discord message to process; may be a channel, DM, or reply message.
+        """
         await append_message_to_cache(message)
         
         # Allow normal bot commands to be handled by discord.py
@@ -114,6 +131,10 @@ def setup_chat(bot):
         # Chatbot prefix (!) — handle via Team
         chatbot_prefix = "!"
         if message.content.startswith(chatbot_prefix):
+            # Check if user is authorized to invoke the agent
+            if str(message.author.id) not in ALLOWED_USER_IDS:
+                logger.info(f"[chatbot] Ignoring unauthorized message from user {message.author.id}")
+                return
             # Step 1: replace mentions with readable form for context
             processed_content = resolve_mentions(message)
             
