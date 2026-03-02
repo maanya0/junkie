@@ -76,6 +76,57 @@ def format_message_timestamp(message_created_at, current_time: datetime) -> str:
         return f"[{message_created_at.strftime('%b %d, %H:%M')}]"
 
 
+def format_message_content(message) -> str:
+    """
+    Unified message content formatter with attachment support.
+    
+    Works with both Discord Message objects and database row dicts.
+    Ensures consistent formatting across all storage and display paths.
+    
+    Args:
+        message: Discord Message object or dict with 'content', 'attachments', 'embeds' keys
+        
+    Returns:
+        Formatted content string including text, attachment markers, and embed indicators
+    """
+    content_parts = []
+    
+    # Handle both Message objects and dicts
+    if hasattr(message, 'clean_content'):
+        # Discord Message object
+        text = message.clean_content
+        attachments = message.attachments
+        embeds = message.embeds
+    else:
+        # Dict from database or other source
+        text = message.get('content', '')
+        attachments = message.get('attachments', [])
+        embeds = message.get('embeds', [])
+    
+    # Add text content
+    if text and text.strip():
+        content_parts.append(text.strip())
+    
+    # Add attachment markers
+    if attachments:
+        for att in attachments:
+            if hasattr(att, 'filename'):
+                # Discord Attachment object
+                content_type = att.content_type or 'file'
+                type_label = content_type.split('/')[0]  # e.g., 'image', 'application', 'video'
+                content_parts.append(f"[{type_label}: {att.filename}]")
+            elif isinstance(att, dict):
+                # Dict representation
+                content_parts.append(f"[attachment: {att.get('filename', 'unknown')}]")
+    
+    # Add embed indicator (only if no attachments, to avoid redundancy)
+    if embeds and not attachments:
+        embed_count = len(embeds) if hasattr(embeds, '__len__') else 1
+        content_parts.append(f"[{embed_count} embed(s)]")
+    
+    return ' '.join(content_parts) if content_parts else '[Empty message]'
+
+
 # ──────────────────────────────────────────────
 # Fetch + Cache Recent Messages
 # ──────────────────────────────────────────────
@@ -200,17 +251,8 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
             timestamp_str = m.created_at.strftime("%Y-%m-%d %H:%M:%S")
             rel_time = format_message_timestamp(m.created_at, current_time)
             
-            # Build content with attachments and embeds
-            content_parts = []
-            if m.content:
-                content_parts.append(m.content)
-            if m.attachments:
-                for att in m.attachments:
-                    content_parts.append(f"[Attachment: {att.url}]")
-            if m.embeds and not m.attachments:  # Only add embeds if no attachments (avoid duplication)
-                content_parts.append(f"[Embed: {len(m.embeds)} embed(s)]")
-            
-            content = " ".join(content_parts) if content_parts else "[Empty message]"
+            # Use unified formatter for consistent content storage
+            content = format_message_content(m)
             
             # Store in DB (handles both insert and update for edits)
             await store_message(
@@ -224,8 +266,9 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
             )
             stored_count += 1
             
+            # Use unified formatter for display as well (consistent with storage)
             formatted.append(
-                f"{rel_time} {m.author.display_name}({m.author.id}): {m.clean_content}"
+                f"{rel_time} {m.author.display_name}({m.author.id}): {content}"
             )
         
         logger.info(f"[fetch_and_cache] Successfully stored {stored_count} messages for channel {channel.id}")
@@ -282,12 +325,13 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None, repl
     current_time_str = now.strftime("%Y-%m-%d %H:%M:%S %Z")
     message_timestamp = format_message_timestamp(message.created_at, now) or "[now]"
 
-    # Format Reply Context if present
+    # Format Reply Context if present (using unified formatter for attachments)
     reply_context_str = ""
     if reply_to_message:
         reply_ts = format_message_timestamp(reply_to_message.created_at, now)
         reply_author = f"{reply_to_message.author.display_name}({reply_to_message.author.id})"
-        reply_content = reply_to_message.clean_content
+        # Use unified formatter to include attachment info in reply context
+        reply_content = format_message_content(reply_to_message)
         reply_context_str = (
             f"\n[REPLY CONTEXT]\n"
             f"The user is replying to:\n"
@@ -315,11 +359,17 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None, repl
 async def append_message_to_cache(message):
     """
     Append a new message to the DB.
+    
+    Uses unified format_message_content() to ensure attachments are included
+    even when text content is empty (e.g., image-only messages).
     """
-    if not message.content.strip():
+    # Use unified formatter to include attachments
+    content = format_message_content(message)
+    
+    # Only skip truly empty messages (no text, no attachments, no embeds)
+    if content == '[Empty message]':
         return
 
-    current_time = datetime.now(timezone.utc)
     timestamp_str = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
     
     await store_message(
@@ -327,7 +377,7 @@ async def append_message_to_cache(message):
         channel_id=message.channel.id,
         author_id=message.author.id,
         author_name=message.author.display_name,
-        content=message.clean_content,
+        content=content,
         created_at=message.created_at,
         timestamp_str=timestamp_str
     )
@@ -336,21 +386,13 @@ async def append_message_to_cache(message):
 async def update_message_in_cache(before, after):
     """
     Update a message in the DB when it's edited.
+    
+    Uses unified format_message_content() for consistent formatting.
     """
     from core.database import store_message
-    from datetime import datetime, timezone
     
-    # Build updated content with attachments
-    content_parts = []
-    if after.content:
-        content_parts.append(after.content)
-    if after.attachments:
-        for att in after.attachments:
-            content_parts.append(f"[Attachment: {att.url}]")
-    if after.embeds and not after.attachments:
-        content_parts.append(f"[Embed: {len(after.embeds)} embed(s)]")
-    
-    content = " ".join(content_parts) if content_parts else "[Empty message]"
+    # Use unified formatter for consistency
+    content = format_message_content(after)
     timestamp_str = after.created_at.strftime("%Y-%m-%d %H:%M:%S")
     
     # Update in database (store_message handles upsert)

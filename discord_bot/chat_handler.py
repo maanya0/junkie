@@ -542,18 +542,33 @@ def setup_chat(bot):
             )
             logger.info(f"[chatbot] Context prompt built, length: {len(prompt)} characters")
 
+            # Process attachments - images go to model, others get noted
             images = []
+            non_image_attachments = []
+            
             if message.attachments:
                 for attachment in message.attachments:
                     if attachment.content_type and attachment.content_type.startswith("image/"):
                         images.append(Image(url=attachment.url))
                         logger.info(f"[chatbot] Found image attachment: {attachment.url}")
+                    else:
+                        # Track non-image attachments (PDFs, documents, etc.)
+                        non_image_attachments.append(attachment)
+                        logger.info(f"[chatbot] Non-image attachment: {attachment.filename} ({attachment.content_type})")
 
             if reply_to_message and reply_to_message.attachments:
                 for attachment in reply_to_message.attachments:
                     if attachment.content_type and attachment.content_type.startswith("image/"):
                         images.append(Image(url=attachment.url))
                         logger.info(f"[chatbot] Found reply image attachment: {attachment.url}")
+            
+            # Add reaction to acknowledge non-image attachments (user feedback)
+            if non_image_attachments:
+                try:
+                    await message.add_reaction('\U0001F4CE')  # 📎 paperclip emoji
+                    logger.info(f"[chatbot] Added paperclip reaction for {len(non_image_attachments)} non-image attachment(s)") 
+                except Exception as e:
+                    logger.warning(f"[chatbot] Failed to add attachment reaction: {e}")
 
             async with message.channel.typing():
                 user_id = str(message.author.id)
