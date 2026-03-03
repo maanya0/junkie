@@ -10,13 +10,6 @@ logger = logging.getLogger(__name__)
 pool: Optional[asyncpg.Pool] = None
 _init_lock = asyncio.Lock()
 
-def _redact_id(user_id: int) -> str:
-    """Redact user ID for logging (shows first 4 and last 2 digits)."""
-    s = str(user_id)
-    if len(s) <= 6:
-        return "***"
-    return f"{s[:4]}...{s[-2:]}"
-
 
 async def init_db():
     """
@@ -182,7 +175,10 @@ async def delete_message(message_id: int) -> bool:
                 message_id,
             )
             deleted_count = int(result.split()[-1]) if result else 0
-            logger.debug(f"Deleted message {message_id} from database")
+            if deleted_count > 0:
+                logger.debug(f"Deleted message {message_id} from database")
+            else:
+                logger.debug(f"Message {message_id} not found (already deleted?)")
             return deleted_count > 0
     except Exception as e:
         logger.error(f"Failed to delete message {message_id}: {e}")
@@ -441,10 +437,17 @@ async def remove_access_control_user(user_id: int) -> bool:
     """Remove a user from the access-control set."""
     if not pool:
         return False
-    async with pool.acquire() as conn:
-        result = await conn.execute("DELETE FROM access_control_users WHERE user_id = $1", user_id)
-        deleted_count = int(result.split()[-1]) if result else 0
-        return deleted_count > 0
+    try:
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM access_control_users WHERE user_id = $1",
+                user_id,
+            )
+            deleted_count = int(result.split()[-1]) if result else 0
+            return deleted_count > 0
+    except Exception as e:
+        logger.error(f"Failed to remove access control user {user_id}: {e}")
+        return False
 
 
 async def get_admin_users() -> Set[str]:
@@ -494,7 +497,11 @@ async def remove_admin_user(user_id: int) -> bool:
     """Revoke admin permissions from a user."""
     if not pool:
         return False
-    async with pool.acquire() as conn:
-        result = await conn.execute("DELETE FROM bot_admins WHERE user_id = $1", user_id)
-        deleted_count = int(result.split()[-1]) if result else 0
-        return deleted_count > 0
+    try:
+        async with pool.acquire() as conn:
+            result = await conn.execute("DELETE FROM bot_admins WHERE user_id = $1", user_id)
+            deleted_count = int(result.split()[-1]) if result else 0
+            return deleted_count > 0
+    except Exception as e:
+        logger.error(f"Failed to remove admin user {user_id}: {e}")
+        return False
