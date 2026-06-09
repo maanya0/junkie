@@ -9,11 +9,8 @@ import time
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict
-from dotenv import load_dotenv
 from core.database import store_message, get_messages, get_message_count, is_channel_fully_backfilled, mark_channel_fully_backfilled
 import discord
-
-load_dotenv()
 
 # Logger
 logger = logging.getLogger(__name__)
