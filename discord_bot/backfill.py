@@ -49,7 +49,7 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                     fetched_count += len(new_messages)
                     logger.info(f"[Backfill] ✓ Caught up {len(new_messages)} new messages. Total: {current_count + len(new_messages)}/{target_limit}")
                 except Exception as e:
-                    logger.error(f"[Backfill] Error catching up: {e}")
+                    logger.warning(f"[Backfill] Error catching up {channel_name}: {e}", exc_info=True)
 
                 # Re-check count after catch-up
                 current_count = await get_message_count(channel_id)
@@ -103,7 +103,7 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                             before_obj = discord.Object(id=batch_oldest_id)
                             return await fetch_and_cache_from_api(channel, limit=batch_limit, before_message=before_obj)
                         except Exception as e:
-                            logger.error(f"[Backfill] Error in parallel batch: {e}")
+                            logger.warning(f"[Backfill] Error in parallel batch for {channel_name}: {e}")
                             return []
                     
                     # First batch uses current oldest_id
@@ -143,7 +143,7 @@ async def backfill_channel(channel, target_limit: int = CONTEXT_AGENT_MAX_MESSAG
                         await asyncio.sleep(0.5)
                         
                 except Exception as e:
-                    logger.error(f"[Backfill] Error deepening history (iteration {deepen_iteration + 1}): {e}")
+                    logger.error(f"[Backfill] Error deepening history for {channel_name} (iteration {deepen_iteration + 1}): {e}", exc_info=True)
                     break
             
             new_count = await get_message_count(channel_id)

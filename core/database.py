@@ -102,6 +102,7 @@ async def delete_message(message_id: int):
             logger.debug(f"Deleted message {message_id} from database")
     except Exception as e:
         logger.error(f"Failed to delete message {message_id}: {e}")
+        raise
 
 async def get_messages(channel_id: int, limit: int = 2000) -> List[Dict]:
     """Retrieve the most recent messages for a channel in chronological order."""
@@ -122,7 +123,7 @@ async def get_messages(channel_id: int, limit: int = 2000) -> List[Dict]:
             # Reverse to chronological order (oldest to newest) for display
             return list(reversed([dict(row) for row in rows]))
     except Exception as e:
-        logger.error(f"Failed to get messages for channel {channel_id}: {e}")
+        logger.warning(f"Failed to get messages for channel {channel_id}: {e} — returning empty list")
         return []
 
 async def get_message_count(channel_id: int) -> int:
@@ -136,7 +137,7 @@ async def get_message_count(channel_id: int) -> int:
                 SELECT COUNT(*) FROM messages WHERE channel_id = $1
             """, channel_id)
     except Exception as e:
-        logger.error(f"Failed to count messages for channel {channel_id}: {e}")
+        logger.warning(f"Failed to count messages for channel {channel_id}: {e} — returning 0")
         return 0
 
 async def get_latest_message_id(channel_id: int) -> Optional[int]:
@@ -153,7 +154,7 @@ async def get_latest_message_id(channel_id: int) -> Optional[int]:
                 LIMIT 1
             """, channel_id)
     except Exception as e:
-        logger.error(f"Failed to get latest message ID for channel {channel_id}: {e}")
+        logger.warning(f"Failed to get latest message ID for channel {channel_id}: {e} — returning None")
         return None
 
 async def get_oldest_message_id(channel_id: int) -> Optional[int]:
@@ -170,7 +171,7 @@ async def get_oldest_message_id(channel_id: int) -> Optional[int]:
                 LIMIT 1
             """, channel_id)
     except Exception as e:
-        logger.error(f"Failed to get oldest message ID for channel {channel_id}: {e}")
+        logger.warning(f"Failed to get oldest message ID for channel {channel_id}: {e} — returning None")
         return None
 
 async def is_channel_fully_backfilled(channel_id: int) -> bool:
@@ -183,7 +184,7 @@ async def is_channel_fully_backfilled(channel_id: int) -> bool:
                 SELECT is_fully_backfilled FROM channel_status WHERE channel_id = $1
             """, channel_id) or False
     except Exception as e:
-        logger.error(f"Failed to check backfill status for {channel_id}: {e}")
+        logger.warning(f"Failed to check backfill status for {channel_id}: {e} — assuming not backfilled")
         return False
 
 async def mark_channel_fully_backfilled(channel_id: int, status: bool = True):
@@ -201,3 +202,4 @@ async def mark_channel_fully_backfilled(channel_id: int, status: bool = True):
             """, channel_id, status)
     except Exception as e:
         logger.error(f"Failed to mark backfill status for {channel_id}: {e}")
+        raise

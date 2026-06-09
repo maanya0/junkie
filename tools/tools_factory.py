@@ -42,4 +42,4 @@ async def setup_mcp():
                 logger.info("MCP tools connected")
         except Exception as e:
             logger = logging.getLogger(__name__)
-            logger.warning(f"Failed to connect MCP tools: {e}")
+            logger.warning(f"Failed to connect MCP tools: {e} — bot will operate without MCP tools")

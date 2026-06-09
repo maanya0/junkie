@@ -1,12 +1,15 @@
 # tldr.py
 
 
+import logging
 import os
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from discord_bot.selfbot import SelfBot
+
+logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────
 # LLM Client (Groq / OpenAI-compatible)
@@ -71,7 +74,8 @@ async def _summarize_messages(messages):
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        return f"OpenAI error: {e}"
+        logger.error(f"[tldr] LLM summarization failed: {e}", exc_info=True)
+        return f"Sorry, summarization failed: {e}"
 
 
 def _build_prompt(messages):

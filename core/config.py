@@ -1,7 +1,30 @@
 import os
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+
+def _env_int(name: str, default: str) -> int:
+    """Parse an environment variable as int, falling back to *default* on bad values."""
+    raw = os.getenv(name, default)
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        logger.warning("Invalid integer for %s=%r, using default %s", name, raw, default)
+        return int(default)
+
+
+def _env_float(name: str, default: str) -> float:
+    """Parse an environment variable as float, falling back to *default* on bad values."""
+    raw = os.getenv(name, default)
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        logger.warning("Invalid float for %s=%r, using default %s", name, raw, default)
+        return float(default)
 
 # Postgres Configuration
 POSTGRES_URL = os.getenv("POSTGRES_URL", "")
@@ -14,13 +37,13 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
 
 # Agent Configuration
-MODEL_TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0.3"))
-MODEL_TOP_P = float(os.getenv("MODEL_TOP_P", "0.9"))
-AGENT_HISTORY_RUNS = int(os.getenv("AGENT_HISTORY_RUNS", "1"))
-AGENT_RETRIES = int(os.getenv("AGENT_RETRIES", "2"))
+MODEL_TEMPERATURE = _env_float("MODEL_TEMPERATURE", "0.3")
+MODEL_TOP_P = _env_float("MODEL_TOP_P", "0.9")
+AGENT_HISTORY_RUNS = _env_int("AGENT_HISTORY_RUNS", "1")
+AGENT_RETRIES = _env_int("AGENT_RETRIES", "2")
 DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
-DEBUG_LEVEL = int(os.getenv("DEBUG_LEVEL", "1"))
-MAX_AGENTS = int(os.getenv("MAX_AGENTS", "100"))
+DEBUG_LEVEL = _env_int("DEBUG_LEVEL", "1")
+MAX_AGENTS = _env_int("MAX_AGENTS", "100")
 
 # Tracing Configuration
 TRACING_ENABLED = os.getenv("TRACING", "false").lower() == "true"
@@ -36,5 +59,5 @@ MCP_URLS = os.getenv("MCP_URLS", "").strip()
 
 # Chat Context Agent Configuration
 CONTEXT_AGENT_MODEL = os.getenv("CONTEXT_AGENT_MODEL", "gemini-2.5-flash-lite")
-CONTEXT_AGENT_MAX_MESSAGES = int(os.getenv("CONTEXT_AGENT_MAX_MESSAGES", "50000"))
-TEAM_LEADER_CONTEXT_LIMIT = int(os.getenv("TEAM_LEADER_CONTEXT_LIMIT", "100"))
+CONTEXT_AGENT_MAX_MESSAGES = _env_int("CONTEXT_AGENT_MAX_MESSAGES", "50000")
+TEAM_LEADER_CONTEXT_LIMIT = _env_int("TEAM_LEADER_CONTEXT_LIMIT", "100")
