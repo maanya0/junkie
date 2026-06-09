@@ -1,21 +1,18 @@
 # tldr.py
 
 
-import os
-
-from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
+from core.config import GROQ_API_KEY
 from discord_bot.selfbot import SelfBot
 
 # ──────────────────────────────────────────────
 # LLM Client (Groq / OpenAI-compatible)
 # ──────────────────────────────────────────────
 
-load_dotenv()
 client = AsyncOpenAI(
-    base_url="https://api.groq.com/openai/v1",  # ← no spaces
-    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1",
+    api_key=GROQ_API_KEY,
 )
 
 # ──────────────────────────────────────────────

@@ -1,7 +1,8 @@
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
+# Discord Configuration
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # Postgres Configuration
 POSTGRES_URL = os.getenv("POSTGRES_URL", "")
@@ -22,6 +23,10 @@ DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
 DEBUG_LEVEL = int(os.getenv("DEBUG_LEVEL", "1"))
 MAX_AGENTS = int(os.getenv("MAX_AGENTS", "100"))
 
+# Redis Configuration
+USE_REDIS = os.getenv("USE_REDIS", "false").lower() == "true"
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
 # Tracing Configuration
 TRACING_ENABLED = os.getenv("TRACING", "false").lower() == "true"
 PHOENIX_API_KEY = os.getenv("PHOENIX_API_KEY")
@@ -38,3 +43,7 @@ MCP_URLS = os.getenv("MCP_URLS", "").strip()
 CONTEXT_AGENT_MODEL = os.getenv("CONTEXT_AGENT_MODEL", "gemini-2.5-flash-lite")
 CONTEXT_AGENT_MAX_MESSAGES = int(os.getenv("CONTEXT_AGENT_MAX_MESSAGES", "50000"))
 TEAM_LEADER_CONTEXT_LIMIT = int(os.getenv("TEAM_LEADER_CONTEXT_LIMIT", "100"))
+
+# Tool API Keys
+EXA_API_KEY = os.getenv("EXA_API_KEY", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
