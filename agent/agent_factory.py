@@ -135,7 +135,7 @@ def get_prompt() -> str:
         else:
             formatted = fetched
     except Exception as e:
-        print("Phoenix prompt fetch error:", e)
+        logger.warning("Phoenix prompt fetch failed, using local fallback: %s", e)
         return get_system_prompt()
 
     # Extract messages

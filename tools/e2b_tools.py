@@ -146,8 +146,8 @@ class SandboxManager:
         paginator = Sandbox.list()
         try:
             items = paginator.next_items()
-        except Exception:
-            # Fallback if list() returns a plain list
+        except Exception as e:
+            logger.debug("paginator.next_items() failed, treating as plain list: %s", e)
             items = paginator
         results = []
         for s in items or []:
@@ -175,8 +175,8 @@ class SandboxManager:
             # shutdown executor
             try:
                 slot.executor.shutdown(wait=False)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Error shutting down executor for sandbox %s: %s", sandbox_id, e)
         with self._lock:
             self.slots.pop(sandbox_id, None)
         return {"status": "success", "sandbox_id": sandbox_id, "result": result}
@@ -492,8 +492,8 @@ class E2BToolkit(Toolkit):
         try:
             slot = self.manager.get_slot(job.sandbox_id)
             slot.jobs.pop(job_id, None)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not clean up job %s from slot: %s", job_id, e)
         self.jobs.pop(job_id, None)
         return {"status": "cancelled" if cancelled else "not_cancelled", "killed_proc": killed_proc, "job_id": job_id}
 
@@ -697,7 +697,8 @@ class E2BToolkit(Toolkit):
             paginator = Sandbox.list()
             try:
                 items = paginator.next_items()
-            except Exception:
+            except Exception as e:
+                logger.debug("paginator.next_items() failed in force_shutdown_all, treating as plain list: %s", e)
                 items = paginator
             for s in items or []:
                 sid = getattr(s, "sandbox_id", None) or getattr(s, "id", None)

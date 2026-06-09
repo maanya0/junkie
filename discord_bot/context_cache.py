@@ -56,8 +56,8 @@ def format_message_timestamp(message_created_at, current_time: datetime) -> str:
         try:
             message_created_at = message_created_at.astimezone(_timezone)
             current_time = current_time.astimezone(_timezone)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Timezone conversion failed for message timestamp: %s", e)
     
     time_diff = current_time - message_created_at
     
@@ -129,7 +129,7 @@ async def get_recent_context(channel, limit: int = 500, before_message=None) -> 
                     # If API returns nothing, we are likely fully backfilled
                     await mark_channel_fully_backfilled(channel_id, True)
             except Exception as e:
-                logger.error(f"[get_recent_context] Error fetching more history: {e}")
+                logger.warning(f"[get_recent_context] Error fetching more history for channel {channel_id}: {e}", exc_info=True)
 
     # FIXED: Don't re-fetch in a loop. Return what we have after one attempt.
     logger.info(f"[get_recent_context] Returning {len(db_messages)} messages from DB (requested {limit}).")
@@ -234,7 +234,7 @@ async def fetch_and_cache_from_api(channel, limit, before_message=None, after_me
         logger.warning(f"[fetch_and_cache] Missing access to channel {channel.id}. Skipping.")
         return []
     except Exception as e:
-        logger.error(f"[fetch_and_cache] Error: {e}", exc_info=True)
+        logger.error(f"[fetch_and_cache] Unexpected error for channel {channel.id}: {e}", exc_info=True)
         return []
 
 
@@ -260,7 +260,8 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None, repl
     try:
         channel_name = getattr(message.channel, "name", "DM")
         guild_name = getattr(message.guild, "name", "DM")
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to extract channel/guild metadata: %s", e)
         channel_name = "unknown"
         guild_name = "DM"
 
@@ -276,8 +277,8 @@ async def build_context_prompt(message, raw_prompt: str, limit: int = None, repl
     if _has_pytz and _timezone != timezone.utc:
         try:
             now = now.astimezone(_timezone)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Timezone conversion failed for current time: %s", e)
             
     current_time_str = now.strftime("%Y-%m-%d %H:%M:%S %Z")
     message_timestamp = format_message_timestamp(message.created_at, now) or "[now]"
@@ -319,18 +320,20 @@ async def append_message_to_cache(message):
     if not message.content.strip():
         return
 
-    current_time = datetime.now(timezone.utc)
     timestamp_str = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
     
-    await store_message(
-        message_id=message.id,
-        channel_id=message.channel.id,
-        author_id=message.author.id,
-        author_name=message.author.display_name,
-        content=message.clean_content,
-        created_at=message.created_at,
-        timestamp_str=timestamp_str
-    )
+    try:
+        await store_message(
+            message_id=message.id,
+            channel_id=message.channel.id,
+            author_id=message.author.id,
+            author_name=message.author.display_name,
+            content=message.clean_content,
+            created_at=message.created_at,
+            timestamp_str=timestamp_str
+        )
+    except Exception as e:
+        logger.warning(f"[append_message_to_cache] Failed to cache message {message.id}: {e}")
 
 
 async def update_message_in_cache(before, after):
@@ -338,7 +341,6 @@ async def update_message_in_cache(before, after):
     Update a message in the DB when it's edited.
     """
     from core.database import store_message
-    from datetime import datetime, timezone
     
     # Build updated content with attachments
     content_parts = []
@@ -353,16 +355,18 @@ async def update_message_in_cache(before, after):
     content = " ".join(content_parts) if content_parts else "[Empty message]"
     timestamp_str = after.created_at.strftime("%Y-%m-%d %H:%M:%S")
     
-    # Update in database (store_message handles upsert)
-    await store_message(
-        message_id=after.id,
-        channel_id=after.channel.id,
-        author_id=after.author.id,
-        author_name=after.author.display_name,
-        content=content,
-        created_at=after.created_at,
-        timestamp_str=timestamp_str
-    )
+    try:
+        await store_message(
+            message_id=after.id,
+            channel_id=after.channel.id,
+            author_id=after.author.id,
+            author_name=after.author.display_name,
+            content=content,
+            created_at=after.created_at,
+            timestamp_str=timestamp_str
+        )
+    except Exception as e:
+        logger.warning(f"[update_message_in_cache] Failed to update message {after.id}: {e}")
 
 
 async def delete_message_from_cache(message):
@@ -370,7 +374,10 @@ async def delete_message_from_cache(message):
     Remove a message from the DB when it's deleted.
     """
     from core.database import delete_message
-    await delete_message(message.id)
+    try:
+        await delete_message(message.id)
+    except Exception as e:
+        logger.warning(f"[delete_message_from_cache] Failed to delete message {message.id}: {e}")
 
 
 async def invalidate_cache(channel_id: int):
